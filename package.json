@@ -1,0 +1,19 @@
+{
+  "name": "tcmb-rezerv-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "TCMB uluslararası rezerv dashboard — Cloudflare Worker API (tqrlab)",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test --experimental-strip-types"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250620.0",
+    "@types/node": "^22.20.0",
+    "typescript": "^5.6.2",
+    "wrangler": "^3.114.0"
+  }
+}
