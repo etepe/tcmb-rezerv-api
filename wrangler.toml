@@ -10,5 +10,5 @@ DEFAULT_WEEKLY_START = "01-10-2025"
 # KV cache. id'yi `wrangler kv namespace create REZERV_CACHE` çıktısıyla doldur.
 [[kv_namespaces]]
 binding = "REZERV_CACHE"
-id = "REPLACE_WITH_KV_NAMESPACE_ID"
+id = "7cadc8955a4647eb9b2f35fc40a032a7"
 # preview_id = "REPLACE_WITH_PREVIEW_KV_ID"   # `wrangler dev` için (opsiyonel)
