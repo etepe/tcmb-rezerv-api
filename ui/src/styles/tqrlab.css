@@ -1,0 +1,50 @@
+/* tqrlab marka tokenları (dark / internal-research).
+ * Mevcut tqrlab.com global stiline EKLE — bu dosyayı ayrı tutma.
+ * Renkler yalnız buradan CSS değişkeni olarak gelir; bileşende hex hardcode yok. */
+:root {
+  --bg: #060a14; /* deep navy arka plan */
+  --panel: #0c1322; /* kart/panel yüzeyi */
+  --grid: #1b2436; /* ızgara çizgileri (chart) */
+  --text: #c9d4e5;
+  --muted: #5b6b86;
+  --blue: #58a6ff;
+  --green: #3fb950;
+  --amber: #d29922;
+  --red: #f85149;
+
+  --font-sans: "DM Sans", system-ui, "Calibri", sans-serif;
+  --font-mono: "JetBrains Mono", "Consolas", ui-monospace, monospace;
+}
+
+/* %4 opaklıkta grid overlay — sayfa arka planı.
+ * Kapsayıcıya `.tqr-grid-overlay` ekle (position: relative). */
+.tqr-grid-overlay::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 32px 32px;
+  opacity: 0.04;
+}
+
+/* Sol-kenarlıklı metric kart deseni (Faz 2'de kullanılır; token burada). */
+.tqr-card {
+  background: var(--panel);
+  border-left: 3px solid var(--blue);
+  border-radius: 8px;
+}
+.tqr-card--up {
+  border-left-color: var(--green);
+}
+.tqr-card--down {
+  border-left-color: var(--red);
+}
+
+/* Mavi glow vurgusu. */
+.tqr-glow {
+  box-shadow: 0 0 24px -8px var(--blue);
+}

@@ -87,9 +87,13 @@ Baz 27-02-2026 = toplam 210.3 / altın 136.8 / döviz 73.4.
 - **Erişim:** sayfa **public** (Cloudflare Access gating yok).
 
 ## Current Status
-- Phase **1 / 4**: Foundation (dikey dilim)
-- Working on: M-001 (haftalık) + M-002 (computeWeekly) + M-003 (/api/weekly+KV) + M-004 (haftalık stacked area)
-- Blocked by: yok
+- Phase **1 / 4**: Foundation (dikey dilim) — ✅ **kod tamam; deploy + canlı kabul testi bekliyor**
+- Tamamlanan: M-001 (haftalık `fetchSeries`) + M-002 (`computeWeekly`/`weeklyMeta`) +
+  M-003 (`GET /api/weekly` + KV cache + CORS + tanımlı hata kodları) + M-004 (haftalık stacked area, tqrlab dark).
+- Doğrulama: `pnpm typecheck` (strict, `any` yok) ✅; `pnpm test` (offline reserve-engine) ✅.
+  Canlı EVDS kabul testi (152.08 / 210.3-136.8-73.4) → `wrangler secret put TCMB_EVDS_KEY` + `wrangler dev` ile çalıştırılacak.
+- Deploy adımları: `README.md` (API) + `ui/README.md` (UI drop-in).
+- Blocked by: yok. **Faz 2'ye geçmeden gözden geçirme bekleniyor.**
 
 ## Development Commands
 ```
@@ -107,13 +111,16 @@ pnpm build && wrangler pages deploy dist  # ya da mevcut Pages projesine route
 ```
 
 ## Module Map
+> Not: bu repo **= `tcmb-rezerv-api` Worker'ı** → API kökte `src/`. UI ise tqrlab.com Astro
+> repo'suna drop-in (`ui/` altında stage'lenir; bkz. `ui/README.md`).
+
 | Module | Path | Status | Agent |
 |---|---|---|---|
-| M-001 evds-client | `api/src/evds-client.ts` | scaffold | sonnet |
-| M-002 reserve-engine | `api/src/reserve-engine.ts` | scaffold | opus |
-| M-003 api-worker | `api/src/index.ts` | scaffold | sonnet |
-| M-004 dashboard-ui | `ui/src/pages/tcmb-rezerv-takip.astro` + `ui/src/components/reserve/*` | scaffold | sonnet |
-| M-005 scheduled-refresh | `api/src/scheduled.ts` | not started (Faz 4) | haiku |
+| M-001 evds-client | `src/evds-client.ts` | ✅ Faz 1 (haftalık) | sonnet |
+| M-002 reserve-engine | `src/reserve-engine.ts` | ✅ Faz 1 (`computeWeekly`/`weeklyMeta`) | opus |
+| M-003 api-worker | `src/index.ts` | ✅ Faz 1 (`/api/weekly`) | sonnet |
+| M-004 dashboard-ui | `ui/src/pages/tcmb-rezerv-takip.astro` + `ui/src/components/reserve/*` | ✅ Faz 1 (haftalık area) | sonnet |
+| M-005 scheduled-refresh | `src/scheduled.ts` | not started (Faz 4) | haiku |
 
 ## Conventions
 - TS strict; `any` yok. Para birimleri `number` (milyar USD), tarihler ISO `string`.

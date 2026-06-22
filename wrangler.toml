@@ -1,0 +1,14 @@
+name = "tcmb-rezerv-api"
+main = "src/index.ts"
+compatibility_date = "2026-06-01"
+
+# Faz 1 yapılandırması (env/var). Secret ayrı: `wrangler secret put TCMB_EVDS_KEY`.
+[vars]
+WEEKLY_TTL = "21600"            # haftalık cache TTL (~6 saat)
+DEFAULT_WEEKLY_START = "01-10-2025"
+
+# KV cache. id'yi `wrangler kv namespace create REZERV_CACHE` çıktısıyla doldur.
+[[kv_namespaces]]
+binding = "REZERV_CACHE"
+id = "REPLACE_WITH_KV_NAMESPACE_ID"
+# preview_id = "REPLACE_WITH_PREVIEW_KV_ID"   # `wrangler dev` için (opsiyonel)
