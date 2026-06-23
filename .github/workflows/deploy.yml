@@ -1,5 +1,8 @@
 # .github/workflows/deploy.yml
-# tcmb-rezerv-api Worker — CI + deploy
+# tcmb-rezerv-api Worker — CI + deploy (Faz 1-2)
+# NOT (Faz 2): node-version 22 — `node --test --experimental-strip-types` testleri
+# Node >= 22.6 gerektirir (Node 20'de tip-sıyırma yok). Smoke artık /api/weekly +
+# /api/summary (günlük nowcast) yapısal kontrolü yapar.
 # Secrets (repo → Settings → Secrets and variables → Actions):
 #   CLOUDFLARE_API_TOKEN   (yeni, dar kapsam: Workers Scripts:Edit + Workers KV:Edit)
 #   CLOUDFLARE_ACCOUNT_ID
@@ -31,7 +34,7 @@ jobs:
         with: { version: 9 }
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Typecheck
@@ -56,7 +59,7 @@ jobs:
         with: { version: 9 }
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Deploy (wrangler)
@@ -80,3 +83,15 @@ jobs:
           V=$(echo "$BODY" | jq -r '.weekly[] | select(.tarih=="2026-06-12") | .toplam')
           echo "12-06-2026 toplam = $V"
           awk -v v="$V" 'BEGIN{ if (v=="" || v<151 || v>153){ print "KABUL TESTI BASARISIZ"; exit 1 } else { print "OK" } }'
+      - name: Canlı /api/summary yapısal smoke (Faz 2 — günlük nowcast)
+        run: |
+          BASE="${{ vars.REZERV_API_URL }}"
+          if [ -z "$BASE" ]; then echo "REZERV_API_URL tanımlı değil — smoke atlanıyor"; exit 0; fi
+          echo "GET $BASE/api/summary?weeklyStart=01-10-2025"
+          SUM=$(curl -fsS "$BASE/api/summary?weeklyStart=01-10-2025")
+          # Yapısal kontrol (kesin nowcast değeri ÇIPA ile haftalık kayar → offline unit testte
+          # sabitlenir; canlı smoke yalnız sözleşmeyi doğrular).
+          echo "$SUM" | jq -e '(.weekly|length>0) and (.daily|length>0)' >/dev/null
+          echo "$SUM" | jq -e '.meta.anchorDate and (.meta.anchorBrut|type=="number") and .meta.peak.tarih' >/dev/null
+          echo "$SUM" | jq -e '(.daily[-1].brutRezerv|type=="number") and (.daily[-1]|has("nir"))' >/dev/null
+          echo "summary OK — çıpa $(echo "$SUM" | jq -r .meta.anchorDate), son brüt $(echo "$SUM" | jq -r .daily[-1].brutRezerv)"

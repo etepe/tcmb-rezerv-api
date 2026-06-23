@@ -1,13 +1,17 @@
 // M-001..M-004 ortak tipleri. `any` yok; tüm dış değerler buradan geçer.
-// Faz 1 kapsamı: yalnızca HAFTALIK brüt rezerv dilimi.
+// Faz 1: HAFTALIK brüt rezerv. Faz 2: + GÜNLÜK nowcast + NIR (`/api/summary`).
+// Faz 3 (swap manuel input + dolarizasyon) burada YOK.
 
-/** Tanımlı API/iç hata kodları (contract C-001 / C-002 / C-004). */
+/** Tanımlı API/iç hata kodları (contract C-001 / C-002 / C-003 / C-004). */
 export type ApiErrorCode =
   | "evds_unavailable"
   | "evds_auth_failed"
   | "non_json_response"
   | "empty_series"
   | "upstream_timeout"
+  // C-003 — computeDailyNowcast (Faz 2)
+  | "no_anchor"
+  | "anchor_not_in_daily"
   | "bad_request"
   | "not_found"
   | "internal_error";
@@ -66,4 +70,45 @@ export interface WeeklyMeta extends WeeklyComputedMeta {
 export interface WeeklyResponse {
   weekly: WeeklyPoint[];
   meta: WeeklyMeta;
+}
+
+/**
+ * Günlük brüt rezerv nowcast noktası — değerler milyar USD (C-003).
+ * `brutRezerv`: çıpa (son resmi haftalık) + günlük Dış Varlık (A02) değişimi.
+ * `nir`: net uluslararası rezerv; A10 (döviz yükümlülükleri) yoksa `null`.
+ */
+export interface DailyPoint {
+  /** ISO tarih `yyyy-mm-dd`. */
+  tarih: string;
+  /** Günlük brüt rezerv nowcast (milyar USD). */
+  brutRezerv: number;
+  /** NIR = (A02 − A10) / USD / 1e6 (milyar USD); A10 yoksa null. */
+  nir: number | null;
+}
+
+/** /api/summary yanıt meta'sı (C-001). Faz 2: haftalık + günlük çıpa bağlamı. */
+export interface SummaryMeta {
+  /** Nowcast çıpası = aralıktaki son resmi haftalık Cuma (ISO). */
+  anchorDate: string;
+  /** Çıpa günündeki resmi haftalık toplam (milyar USD). */
+  anchorBrut: number;
+  /** Tüm aralıktaki zirve (en yüksek haftalık toplam). */
+  peak: { tarih: string; toplam: number };
+  /** En güncel haftalık noktanın tarihi (ISO). */
+  latestWeekly: string;
+  /** En güncel günlük nowcast noktasının tarihi (ISO). */
+  latestDaily: string;
+  /** Yanıtın üretildiği an (ISO datetime). */
+  updatedAt: string;
+  unit: "milyar USD";
+  source: "TCMB EVDS";
+  /** Bu yanıt KV cache'ten mi geldi. */
+  cached: boolean;
+}
+
+/** GET /api/summary yanıt gövdesi (C-001). Faz 3 (dolarizasyon) burada YOK. */
+export interface SummaryResponse {
+  weekly: WeeklyPoint[];
+  daily: DailyPoint[];
+  meta: SummaryMeta;
 }
