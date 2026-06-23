@@ -31,15 +31,15 @@ jobs:
         with: { version: 9 }
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Typecheck
         run: pnpm exec tsc --noEmit
       - name: Lint
-        run: pnpm run lint --if-present
+        run: pnpm run --if-present lint
       - name: Test
-        run: pnpm run test --if-present
+        run: pnpm run --if-present test
       - name: Build doğrulama (deploy etmeden)
         run: pnpm exec wrangler deploy --dry-run --outdir=dist
         env:
@@ -56,7 +56,7 @@ jobs:
         with: { version: 9 }
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Deploy (wrangler)
