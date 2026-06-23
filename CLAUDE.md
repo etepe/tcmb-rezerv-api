@@ -87,13 +87,19 @@ Baz 27-02-2026 = toplam 210.3 / altın 136.8 / döviz 73.4.
 - **Erişim:** sayfa **public** (Cloudflare Access gating yok).
 
 ## Current Status
-- Phase **1 / 4**: Foundation (dikey dilim) — ✅ **kod tamam; deploy + canlı kabul testi bekliyor**
-- Tamamlanan: M-001 (haftalık `fetchSeries`) + M-002 (`computeWeekly`/`weeklyMeta`) +
+- Phase **2 / 4**: Günlük nowcast + NIR + metric kartlar — ✅ **API kodu tamam; deploy + canlı kabul testi bekliyor**
+- Tamamlanan (Faz 1): M-001 (haftalık `fetchSeries`) + M-002 (`computeWeekly`/`weeklyMeta`) +
   M-003 (`GET /api/weekly` + KV cache + CORS + tanımlı hata kodları) + M-004 (haftalık stacked area, tqrlab dark).
-- Doğrulama: `pnpm typecheck` (strict, `any` yok) ✅; `pnpm test` (offline reserve-engine) ✅.
-  Canlı EVDS kabul testi (152.08 / 210.3-136.8-73.4) → `wrangler secret put TCMB_EVDS_KEY` + `wrangler dev` ile çalıştırılacak.
-- Deploy adımları: `README.md` (API) + `ui/README.md` (UI drop-in).
-- Blocked by: yok. **Faz 2'ye geçmeden gözden geçirme bekleniyor.**
+- Tamamlanan (Faz 2 — API): M-001 (+günlük A02/A10/USD; generic `fetchSeries`) + M-002 (`computeDailyNowcast`
+  nowcast + NIR) + M-003 (`GET /api/summary` → `{weekly, daily, meta}`, `DAILY_TTL` KV cache). `/api/weekly` korundu.
+- Doğrulama: `pnpm typecheck` (strict, `any` yok) ✅; `pnpm test` (offline reserve-engine + `/api/summary` mock) ✅;
+  `pnpm dry-run` ✅. CI: `.github/workflows/deploy.yml` (check: typecheck/test/dry-run; deploy+smoke main'de;
+  Node 22 — tip-sıyırma testleri için; smoke /api/weekly + /api/summary yapısal).
+  Kabul testleri offline doğrulandı: nowcast 17/18/19-06 = 164.2/159.4/157.1, NIR_19 ≈ 48.2, çıpa 12-06 = 152.08.
+  Canlı EVDS kabul testi → `wrangler secret put TCMB_EVDS_KEY` + `wrangler deploy` ile.
+- Faz 2 UI (Part B): tqrlab.com Astro repo'sunda `/tcmb-rezerv-takip` → `/api/summary`'ye geçiş + nowcast kuyruğu + kartlar.
+- Dışında (Faz 3): swap (manuel input), `swapHaricNet`, dolarizasyon, cron.
+- Blocked by: yok.
 
 ## Development Commands
 ```
@@ -116,10 +122,10 @@ pnpm build && wrangler pages deploy dist  # ya da mevcut Pages projesine route
 
 | Module | Path | Status | Agent |
 |---|---|---|---|
-| M-001 evds-client | `src/evds-client.ts` | ✅ Faz 1 (haftalık) | sonnet |
-| M-002 reserve-engine | `src/reserve-engine.ts` | ✅ Faz 1 (`computeWeekly`/`weeklyMeta`) | opus |
-| M-003 api-worker | `src/index.ts` | ✅ Faz 1 (`/api/weekly`) | sonnet |
-| M-004 dashboard-ui | `ui/src/pages/tcmb-rezerv-takip.astro` + `ui/src/components/reserve/*` | ✅ Faz 1 (haftalık area) | sonnet |
+| M-001 evds-client | `src/evds-client.ts` | ✅ Faz 1-2 (haftalık + günlük; generic) | sonnet |
+| M-002 reserve-engine | `src/reserve-engine.ts` | ✅ Faz 1-2 (`computeWeekly`/`weeklyMeta`/`computeDailyNowcast`) | opus |
+| M-003 api-worker | `src/index.ts` | ✅ Faz 1-2 (`/api/weekly` + `/api/summary`) | sonnet |
+| M-004 dashboard-ui | `ui/src/pages/tcmb-rezerv-takip.astro` + `ui/src/components/reserve/*` | ✅ Faz 1 (haftalık area); Faz 2 UI tqrlab.com repo'sunda | sonnet |
 | M-005 scheduled-refresh | `src/scheduled.ts` | not started (Faz 4) | haiku |
 
 ## Conventions
