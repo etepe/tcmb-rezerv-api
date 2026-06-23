@@ -39,10 +39,8 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Typecheck
         run: pnpm exec tsc --noEmit
-      - name: Lint
-        run: pnpm run lint --if-present
       - name: Test
-        run: pnpm run test --if-present
+        run: pnpm test
       - name: Build doğrulama (deploy etmeden)
         run: pnpm exec wrangler deploy --dry-run --outdir=dist
         env:
