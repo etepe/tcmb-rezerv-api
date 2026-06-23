@@ -10,6 +10,7 @@ Bu klasör **bu repoda build edilmez.** Dosyalar mevcut **tqrlab.com Astro repo*
 | `ui/src/pages/tcmb-rezerv-takip.astro` | `src/pages/tcmb-rezerv-takip.astro` |
 | `ui/src/components/reserve/ReserveAreaChart.tsx` | `src/components/reserve/ReserveAreaChart.tsx` |
 | `ui/src/styles/tqrlab.css` | mevcut global tqrlab stiline **token'ları ekle** (yeni dosya açma) |
+| `ui/.env.example` | `.env.example`'a `PUBLIC_REZERV_API_BASE` satırını ekle |
 
 ## Gereken bağımlılıklar (Astro repo'da)
 
@@ -27,13 +28,15 @@ export default defineConfig({ integrations: [react()] });
 
 ## Yapılandırma
 
-Worker tabanını env ile geç (deploy edilmiş Worker URL'i):
+Worker tabanını env ile geç (deploy edilmiş Worker URL'i). Astro'da
+`import.meta.env.PUBLIC_REZERV_API_BASE` ile okunur:
 
 ```bash
-# .env (Astro)
-PUBLIC_TCMB_API_BASE="https://tcmb-rezerv-api.<hesap>.workers.dev"
+# .env (Astro) — bkz. ui/.env.example
+PUBLIC_REZERV_API_BASE="https://tcmb-rezerv-api.<hesap>.workers.dev"
 ```
 
+Cloudflare Pages'te aynı değişkeni **build/runtime env var** olarak da tanımla.
 Sayfa **public**'tir (Cloudflare Access gating yok). Grafik client island olarak
 (`client:load`) Worker'ın `/api/weekly?start=01-10-2025` ucundan veri çeker.
 

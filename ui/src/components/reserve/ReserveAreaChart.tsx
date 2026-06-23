@@ -65,11 +65,15 @@ function useBrandColors() {
 }
 
 const nfTR = new Intl.NumberFormat("tr-TR", { maximumFractionDigits: 1 });
-const monthTR = new Intl.DateTimeFormat("tr-TR", { month: "short", year: "2-digit" });
+const monthShortTR = new Intl.DateTimeFormat("tr-TR", { month: "short" });
 
+/** ISO -> kısa ay + iki haneli yıl, ör. "Oca'26". */
 function fmtAxisDate(iso: string): string {
   const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? iso : monthTR.format(d);
+  if (Number.isNaN(d.getTime())) return iso;
+  const mon = monthShortTR.format(d).replace(/\.$/, "");
+  const yy = String(d.getFullYear()).slice(-2);
+  return `${mon}'${yy}`;
 }
 function fmtFullDate(iso: string): string {
   const d = new Date(iso);
@@ -93,13 +97,17 @@ export default function ReserveAreaChart({ apiBase, start = "01-10-2025" }: Prop
       })
       .then(setData)
       .catch((e: unknown) => {
-        if ((e as Error).name !== "AbortError") setError((e as Error).message);
+        const err = e as Error;
+        if (err.name === "AbortError") return;
+        // Ham hatayı kullanıcıya gösterme (C-001): konsola yaz, UI'da nazik mesaj.
+        console.error("[tcmb-rezerv] /api/weekly yüklenemedi:", err);
+        setError("Rezerv verisi şu an yüklenemedi. Lütfen birazdan tekrar deneyin.");
       });
     return () => ctrl.abort();
   }, [apiBase, start]);
 
   if (error) {
-    return <div style={{ color: c.muted, fontFamily: c.mono, padding: "2rem" }}>Veri yüklenemedi: {error}</div>;
+    return <div style={{ color: c.muted, fontFamily: c.mono, padding: "2rem" }}>{error}</div>;
   }
   if (!data) {
     return <div style={{ color: c.muted, fontFamily: c.mono, padding: "2rem" }}>Yükleniyor…</div>;
