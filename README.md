@@ -4,8 +4,8 @@ TCMB uluslararası rezerv dashboard'unun **Cloudflare Worker API**'si (tqrlab).
 EVDS3'ten haftalık brüt rezervi çeker, hesaplar, KV'de cache'ler ve JSON sunar.
 EVDS anahtarı **Worker secret**'tadır; tarayıcıya/repoya/URL'e asla gitmez.
 
-> **Faz 2 / 4**. Kapsam: haftalık brüt rezerv (`/api/weekly`) **+ günlük nowcast + NIR**
-> (`/api/summary`). Dolarizasyon / swap (manuel input) / cron → Faz 3-4.
+> **Faz 4 / 4**. Kapsam: haftalık brüt rezerv (`/api/weekly`) **+ günlük nowcast + NIR**
+> + **dolarizasyon** (`/api/summary`) **+ cron ön-ısıtma** (KV cache warm). Swap manuel input UI tarafında.
 
 ## Mimari (Faz 1 dilimi)
 
@@ -16,9 +16,10 @@ EVDS3 → evds-client (M-001) → reserve-engine (M-002) → api-worker (M-003) 
 | Modül | Dosya | Sorumluluk |
 |---|---|---|
 | M-001 evds-client | `src/evds-client.ts` | EVDS3 ham seri çek + normalize (tek dış temas; haftalık + günlük) |
-| M-002 reserve-engine | `src/reserve-engine.ts` | `computeWeekly` + `weeklyMeta` + `computeDailyNowcast` (saf) |
-| M-003 api-worker | `src/index.ts` | `GET /api/weekly`, `GET /api/summary`, KV cache, CORS, hata kodları |
-| M-004 dashboard-ui | `ui/` (Astro repo'ya drop-in) | Haftalık stacked area + günlük nowcast kuyruğu + kartlar (tqrlab dark) |
+| M-002 reserve-engine | `src/reserve-engine.ts` | `computeWeekly` + `weeklyMeta` + `computeDailyNowcast` + `computeDolarizasyon` (saf) |
+| M-003 api-worker | `src/index.ts` (+ `src/summary.ts`) | `GET /api/weekly`, `GET /api/summary`, KV cache, CORS, hata kodları. `summary.ts` = paylaşılan fetch+compute+cache (HTTP + cron aynı yol) |
+| M-004 dashboard-ui | `ui/` (Astro repo'ya drop-in) | Haftalık stacked area + günlük nowcast kuyruğu + dolarizasyon + kartlar (tqrlab dark) |
+| M-005 scheduled-refresh | `src/scheduled.ts` | Cron Trigger → KV ön-ısıtma (`summary` + `weekly` anahtarı); public sözleşmeyi değiştirmez |
 
 ## API
 
@@ -41,8 +42,9 @@ EVDS3 → evds-client (M-001) → reserve-engine (M-002) → api-worker (M-003) 
 ### `GET /api/summary?weeklyStart=dd-mm-yyyy&end=dd-mm-yyyy`
 - Haftalık + **günlük nowcast + NIR** birlikte. `weeklyStart`/`end` opsiyonel.
 - Çıpa = aralıktaki son resmi haftalık `toplam`; günlük seri çıpadan bugüne çekilir.
-- Yanıt: `{ weekly: WeeklyPoint[], daily: DailyPoint[], meta }` — değerler **milyar USD**.
-  `daily[i]` = `{ tarih, brutRezerv, nir }`. Dolarizasyon/swap **yok** (Faz 3).
+- Yanıt: `{ weekly: WeeklyPoint[], daily: DailyPoint[], dolarizasyon: DolarPoint[], meta }` — değerler **milyar USD**.
+  `daily[i]` = `{ tarih, brutRezerv, nir }`; `dolarizasyon[i]` = `{ tarih, ypToplam, ypYurtici }`
+  (haftalık YP mevduat; **soft-fail** → EVDS hatasında `[]`). Swap **manuel input** UI tarafında (API'de yok).
 
 ```json
 {
@@ -103,6 +105,21 @@ wrangler deploy
 - `DAILY_TTL` (sn, varsayılan `3600` ≈ 1 sa) — `/api/summary` KV cache TTL'i (günlük daha sık tazelenir).
 - `DEFAULT_WEEKLY_START` (`dd-mm-yyyy`) — `start`/`weeklyStart` verilmezse kullanılır.
 - `TCMB_EVDS_KEY` **secret** (toml'da DEĞİL).
+
+## Cron ön-ısıtma (Faz 4 · M-005)
+`wrangler.toml → [triggers].crons` ile Worker periyodik olarak `scheduled()` handler'ını
+çalıştırır (`src/scheduled.ts → warmCache`). Handler, UI'nin (ve CI smoke'unun) düştüğü
+KV anahtarlarını tazeler: `summary:{DEFAULT_WEEKLY_START}:{bugün}` **ve** `weekly:…`.
+Böylece kullanıcı (ve deploy sonrası smoke) hep **sıcak cache**'e düşer; "bayat cache" kaynaklı
+smoke hatası sınıfı kapanır. Fetch+compute mantığı HTTP handler ile **aynı** `buildSummary`/
+`buildWeekly` (src/summary.ts) — kopya yok. **Public API sözleşmesi değişmez; cron yalnız cache ısıtır.**
+
+Tetikler (UTC; TR = UTC+3) — mütevazı sıklık, EVDS dövülmez (~16 tetik/hafta):
+- `0 8,12,16 * * 1-5` — hafta içi 11/15/19 TR (analitik bilanço / iş günü A02·A10·USD).
+- `0 17 * * 5` — Cuma 20 TR (haftalık brüt rezerv yayımı).
+
+Deploy sonrası tetikler Cloudflare dashboard (Workers → tcmb-rezerv-api → Triggers) veya
+`wrangler deployments` ile doğrulanır. Hatalar `warmCache` içinde yutulur (cron handler asla fırlatmaz).
 
 ## UI
 `ui/` klasörü tqrlab.com Astro repo'suna drop-in'dir; bkz. `ui/README.md`.
