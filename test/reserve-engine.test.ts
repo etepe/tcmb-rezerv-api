@@ -5,6 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   computeDailyNowcast,
+  computeDolarizasyon,
   computeWeekly,
   EngineError,
   weeklyMeta,
@@ -111,5 +112,43 @@ test("computeDailyNowcast: çıpa günlükte yok -> anchor_not_in_daily", () => 
   assert.throws(
     () => computeDailyNowcast(weeklyFixture, rows),
     (e: unknown) => e instanceof EngineError && e.code === "anchor_not_in_daily",
+  );
+});
+
+// --- Faz 3: computeDolarizasyon (haftalık YP mevduat) -----------------------
+// Kabul (DoD): 12-06-2026 -> ypToplam ≈ 262.1, ypYurtici ≈ 222.0 (ham milyon /1000).
+const dolarRows: RawRow[] = [
+  { tarih: "27-02-2026", TP_HPBITABLO4_1: 250000, TP_HPBITABLO4_2: 210000 },
+  // Sırasız girilir; computeDolarizasyon artan sıralamalı dönmeli.
+  { tarih: "12-06-2026", TP_HPBITABLO4_1: 262100, TP_HPBITABLO4_2: 222000 },
+];
+
+test("computeDolarizasyon: /1000, ISO tarih, sıralama, kabul (262.1/222.0)", () => {
+  const dolar = computeDolarizasyon(dolarRows);
+  assert.equal(dolar.length, 2);
+  // Artan sıra.
+  assert.equal(dolar[0]?.tarih, "2026-02-27");
+  assert.equal(dolar[1]?.tarih, "2026-06-12");
+  // /1000 dönüşümü (milyon -> milyar).
+  assert.equal(dolar[0]?.ypToplam, 250);
+  assert.equal(dolar[0]?.ypYurtici, 210);
+  // Kabul: 12-06 -> 262.1 / 222.0.
+  assert.ok(Math.abs((dolar[1]?.ypToplam ?? 0) - 262.1) < 1e-6, "ypToplam 262.1");
+  assert.ok(Math.abs((dolar[1]?.ypYurtici ?? 0) - 222.0) < 1e-6, "ypYurtici 222.0");
+});
+
+test("computeDolarizasyon: ypYurtici null -> 0; ypToplam null satır atılır", () => {
+  const dolar = computeDolarizasyon([
+    { tarih: "12-06-2026", TP_HPBITABLO4_1: 262100, TP_HPBITABLO4_2: null },
+    { tarih: "19-06-2026", TP_HPBITABLO4_1: null, TP_HPBITABLO4_2: 1 }, // toplam null -> atılır
+  ]);
+  assert.equal(dolar.length, 1);
+  assert.equal(dolar[0]?.ypYurtici, 0);
+});
+
+test("computeDolarizasyon: boş seri -> empty_series", () => {
+  assert.throws(
+    () => computeDolarizasyon([{ tarih: "01-01-2026", TP_HPBITABLO4_1: null }]),
+    (e: unknown) => e instanceof EngineError && e.code === "empty_series",
   );
 });

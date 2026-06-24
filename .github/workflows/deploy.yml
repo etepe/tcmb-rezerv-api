@@ -92,4 +92,6 @@ jobs:
           echo "$SUM" | jq -e '(.weekly|length>0) and (.daily|length>0)' >/dev/null
           echo "$SUM" | jq -e '.meta.anchorDate and (.meta.anchorBrut|type=="number") and .meta.peak.tarih' >/dev/null
           echo "$SUM" | jq -e '(.daily[-1].brutRezerv|type=="number") and (.daily[-1]|has("nir"))' >/dev/null
-          echo "summary OK — çıpa $(echo "$SUM" | jq -r .meta.anchorDate), son brüt $(echo "$SUM" | jq -r .daily[-1].brutRezerv)"
+          # Faz 3 — dolarizasyon alanı sözleşmesi (soft-fail: varlık + tip; katı değer offline testte).
+          echo "$SUM" | jq -e 'has("dolarizasyon") and (.dolarizasyon|type=="array")' >/dev/null
+          echo "summary OK — çıpa $(echo "$SUM" | jq -r .meta.anchorDate), son brüt $(echo "$SUM" | jq -r .daily[-1].brutRezerv), dolarizasyon nokta $(echo "$SUM" | jq -r '.dolarizasyon|length')"
