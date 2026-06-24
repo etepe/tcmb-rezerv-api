@@ -1,11 +1,13 @@
 // M-002 reserve-engine — saf, yan etkisiz hesap fonksiyonları.
 // Faz 1: `computeWeekly` (+ `weeklyMeta`). Faz 2: + `computeDailyNowcast` (nowcast + NIR).
+// Faz 3: + `computeDolarizasyon` (haftalık YP mevduat → DolarPoint[]).
 // Kaynak mantık: tcmb_reserves.py `fetch_weekly` / `fetch_daily_nowcast` normalize adımları.
 // >>> Formülleri "iyileştirme"; tcmb_reserves.py'de doğrulandı, birebir port. <<<
 
 import type {
   ApiErrorCode,
   DailyPoint,
+  DolarPoint,
   RawRow,
   WeeklyComputedMeta,
   WeeklyPoint,
@@ -29,6 +31,9 @@ const K_ALTIN = "TP_AB_C1"; //      TP.AB.C1      — altın
 const K_A02 = "TP_AB_A02"; //       TP.AB.A02        — Dış Varlıklar (bin TL)
 const K_A10 = "TP_AB_A10"; //       TP.AB.A10        — Toplam Döviz Yükümlülükleri (bin TL)
 const K_USD = "TP_DK_USD_A_YTL"; // TP.DK.USD.A.YTL  — USD alış kuru (TL)
+// Haftalık YP mevduat (dolarizasyon) — milyon USD.
+const K_YP_TOPLAM = "TP_HPBITABLO4_1"; //  TP.HPBITABLO4.1 — toplam YP mevduat
+const K_YP_YURTICI = "TP_HPBITABLO4_2"; // TP.HPBITABLO4.2 — yurt içi yerleşik YP mevduat
 
 /** RawRow'dan sayısal değer (yalnız number; string/null/undefined -> null). */
 function num(row: RawRow, key: string): number | null {
@@ -160,4 +165,33 @@ export function computeDailyNowcast(
     brutRezerv: anchor.toplam + (d.disVarlikUsd - baseDv),
     nir: d.nir,
   }));
+}
+
+/**
+ * Ham TP.HPBITABLO4.1/.2 satırlarından `DolarPoint[]` türetir (Faz 3 — dolarizasyon).
+ * - `ypToplam` null olan satırlar atılır (computeWeekly `dropna` deseni).
+ * - Değerler /1000 (milyon USD -> milyar USD).
+ * - Tarih ISO'ya çevrilir ve artan sıralanır.
+ *
+ * HAFTALIK YP mevduat (analist günlük DTH'inden farklı; ham veri, ayrıştırma YOK).
+ * Hata: `empty_series` (geçerli satır yok) — handleSummary'de soft-fail ile yakalanır.
+ */
+export function computeDolarizasyon(rows: RawRow[]): DolarPoint[] {
+  const points: DolarPoint[] = [];
+  for (const row of rows) {
+    const ypToplam = num(row, K_YP_TOPLAM);
+    if (ypToplam === null) continue; // toplam yoksa atla
+    const ypYurtici = num(row, K_YP_YURTICI);
+    points.push({
+      tarih: isoDate(row.tarih),
+      ypToplam: ypToplam / 1000,
+      // İki haftalık seri birlikte yayımlanır; yurt içi pratikte hep dolu.
+      ypYurtici: ypYurtici === null ? 0 : ypYurtici / 1000,
+    });
+  }
+  if (points.length === 0) {
+    throw new EngineError("empty_series", "Dolarizasyon serisi boş (geçerli YP mevduat yok).");
+  }
+  points.sort((a, b) => a.tarih.localeCompare(b.tarih));
+  return points;
 }

@@ -1,17 +1,25 @@
 // M-003 api-worker — HTTP route'ları, KV cache, CORS, tanımlı hata yanıtları.
 // Faz 1: GET /api/weekly (C-001 haftalık alt kümesi).
 // Faz 2: + GET /api/summary (haftalık + günlük nowcast + NIR; C-001).
+// Faz 3: + /api/summary.dolarizasyon (haftalık YP mevduat; soft-fail).
 
 import type {
   ApiError,
   ApiErrorCode,
+  DolarPoint,
   SummaryMeta,
   SummaryResponse,
   WeeklyMeta,
   WeeklyResponse,
 } from "./types.ts";
 import { EvdsError, fetchSeries } from "./evds-client.ts";
-import { computeDailyNowcast, computeWeekly, EngineError, weeklyMeta } from "./reserve-engine.ts";
+import {
+  computeDailyNowcast,
+  computeDolarizasyon,
+  computeWeekly,
+  EngineError,
+  weeklyMeta,
+} from "./reserve-engine.ts";
 
 export interface Env {
   /** EVDS anahtarı — `wrangler secret put TCMB_EVDS_KEY`. Asla yanıtta/logda. */
@@ -30,6 +38,8 @@ export interface Env {
 const WEEKLY_CODES = ["TP.AB.TOPLAM", "TP.AB.C2", "TP.AB.C1"];
 // Günlük analitik bilanço seri kodları (İŞ GÜNÜ): Dış Varlık / Döviz Yük. / USD kuru.
 const DAILY_CODES = ["TP.AB.A02", "TP.AB.A10", "TP.DK.USD.A.YTL"];
+// Haftalık YP mevduat (dolarizasyon) seri kodları (Cuma): toplam / yurt içi yerleşik.
+const DOLARIZASYON_CODES = ["TP.HPBITABLO4.1", "TP.HPBITABLO4.2"];
 const DEFAULT_WEEKLY_TTL = 21600; // ~6 saat
 const DEFAULT_DAILY_TTL = 3600; //   ~1 saat (summary; günlük veri daha sık tazelenir)
 const FALLBACK_START = "01-10-2025";
@@ -136,11 +146,15 @@ async function handleWeekly(url: URL, env: Env): Promise<Response> {
 }
 
 /**
- * GET /api/summary — haftalık + günlük nowcast + NIR (C-001).
- * Faz 3 (swap manuel input + dolarizasyon) burada YOK.
+ * GET /api/summary — haftalık + günlük nowcast + NIR + dolarizasyon (C-001).
  *
  * Akış: haftalık seri çek -> computeWeekly -> çıpa = son haftalık nokta ->
- * günlük seri [çıpa, end] çek -> computeDailyNowcast -> birleştir + meta.
+ * günlük seri [çıpa, end] çek -> computeDailyNowcast -> haftalık YP mevduat çek ->
+ * computeDolarizasyon (soft-fail) -> birleştir + meta.
+ *
+ * Faz 3 — dolarizasyon (haftalık YP mevduat) best-effort eklenir: EVDS'ten çekilemez
+ * ya da seri boşsa `dolarizasyon: []` döner; haftalık/günlük çekirdek dashboard düşmez.
+ * Swap manuel input UI tarafındadır — API'de swap hesabı YOK.
  *
  * Cache: tüm summary tek anahtarda, DAILY_TTL (~1 sa) ile. Summary günlük veri
  * içerdiği için haftalık TTL (~6 sa) değil daha kısa günlük TTL kullanılır;
@@ -188,6 +202,16 @@ async function handleSummary(url: URL, env: Env): Promise<Response> {
   const daily = computeDailyNowcast(weekly, dailyRows);
   const latestDaily = daily[daily.length - 1];
 
+  // 3b) Haftalık dolarizasyon (YP mevduat) — best-effort/soft-fail. Çekirdek
+  //     haftalık/günlük dashboard ikincil panele bağımlı olmasın: hata -> [].
+  let dolarizasyon: DolarPoint[] = [];
+  try {
+    const dolarRows = await fetchSeries(DOLARIZASYON_CODES, start, end, env.TCMB_EVDS_KEY);
+    dolarizasyon = computeDolarizasyon(dolarRows);
+  } catch {
+    dolarizasyon = [];
+  }
+
   const meta: SummaryMeta = {
     anchorDate: anchor.tarih,
     anchorBrut: anchor.toplam,
@@ -199,10 +223,15 @@ async function handleSummary(url: URL, env: Env): Promise<Response> {
     source: "TCMB EVDS",
     cached: false,
   };
-  const payload: SummaryResponse = { weekly, daily, meta };
+  const payload: SummaryResponse = { weekly, daily, dolarizasyon, meta };
 
   // 4) KV yaz (TTL'li). Cache'lenmiş kopyada cached=true işaretle.
-  const toCache: SummaryResponse = { weekly, daily, meta: { ...meta, cached: true } };
+  const toCache: SummaryResponse = {
+    weekly,
+    daily,
+    dolarizasyon,
+    meta: { ...meta, cached: true },
+  };
   await env.REZERV_CACHE.put(cacheKey, JSON.stringify(toCache), { expirationTtl: ttl });
 
   return json(payload, 200);
