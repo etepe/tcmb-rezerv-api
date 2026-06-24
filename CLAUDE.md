@@ -106,8 +106,17 @@ Baz 27-02-2026 = toplam 210.3 / altın 136.8 / döviz 73.4.
   smoke) **main'de yeşil** — smoke `/api/weekly` (152.08) + `/api/summary` yapısal (+ dolarizasyon alan/tip).
   Kabul (offline + canlı): çıpa 12-06 = 152.08; nowcast 17/18/19-06 = 164.2/159.4/157.1, NIR_19 ≈ 48.2;
   **dolarizasyon 12-06 = ypToplam 262.1 / ypYurtici 222.0**.
-- Kalan (Faz 4): Part B (light-tema paylaşım/PDF varyantı — UI repo) · opsiyonel Part C (swap gerçek stok kaynağı araştırma).
-- Blocked by: yok.
+- Tamamlanan (Faz 4 — Part B · CANLI): light-tema paylaşım/PDF varyantı (tqrlab.com repo). `BaseLayout`
+  head script `?theme=light|dark` + `?print=1` (boyamadan önce; URL override localStorage'a YAZILMAZ);
+  `tqrlab.css` `@media print` + `:root[data-print="1"]` sade snapshot (yalnız bu sayfada yüklü → site geneli
+  print bozulmaz); "Yazdır / PDF" (dark→light→print→restore) + "Paylaşım linki" (`?theme=light&swap=` panoya)
+  araç çubuğu; swap girişi `no-print` (değer kart+notta kalır). tqrlab küçük harf + caveat paylaşım/PDF'te korunur.
+  Doğrulama: `astro build` ✅; `astro check` 0 yeni hata; tarayıcı testi (dark/light/?print/mobil/paylaş/yazdır) ✅.
+- Faz 4 — Part C (araştırma, opsiyonel): swap gerçek stok kaynağı → **kısmi/belirsiz, manuel KALDI**. EVDS'te
+  swap-ilişkili seriler aslında VAR (IMF rezerv şablonu `4003/bie_ulusdovlkd` aylık forward/swap kısa pozisyon;
+  "TCMB Taraflı Swap İşlemleri" günlük akım+stok, 2021'den) ama analist "swap hariç net" stok tanımına birebir
+  oturmaz (tanım farkı + yabancı MB swap'ı ayrı yayımlanmıyor + leaf kodları doğrulanmadı). Bkz. memory.
+- Blocked by: yok. **Çekirdek dashboard + sertleştirme TAMAM (Faz 1-4 CANLI).**
 
 ## Development Commands
 ```
@@ -133,7 +142,7 @@ pnpm build && wrangler pages deploy dist  # ya da mevcut Pages projesine route
 | M-001 evds-client | `src/evds-client.ts` | ✅ Faz 1-3 (haftalık + günlük + YP mevduat; generic) | sonnet |
 | M-002 reserve-engine | `src/reserve-engine.ts` | ✅ Faz 1-3 (`computeWeekly`/`weeklyMeta`/`computeDailyNowcast`/`computeDolarizasyon`) | opus |
 | M-003 api-worker | `src/index.ts` (+ `src/summary.ts`) | ✅ Faz 1-4 (`/api/weekly` + `/api/summary` [+ `dolarizasyon` soft-fail]; fetch+compute+cache `summary.ts`'te, HTTP+cron paylaşır) | sonnet |
-| M-004 dashboard-ui | tqrlab.com repo: `src/components/reserve/*` (`ReserveDashboard`/`AreaChart`/`MetricCards`/`Dolarizasyon`/`SwapCard`) | ✅ Faz 1-3 (CANLI) | sonnet |
+| M-004 dashboard-ui | tqrlab.com repo: `src/components/reserve/*` (`ReserveDashboard`/`AreaChart`/`MetricCards`/`Dolarizasyon`/`SwapCard`) | ✅ Faz 1-4 (CANLI; + light-tema paylaşım/PDF varyantı: `?theme`/`?print`, `@media print`, yazdır/paylaş araç çubuğu) | sonnet |
 | M-005 scheduled-refresh | `src/scheduled.ts` | ✅ Faz 4 — cron KV ön-ısıtma (`warmCache` → `summary`+`weekly`; `[triggers]` wrangler.toml) | haiku |
 
 ## Conventions
