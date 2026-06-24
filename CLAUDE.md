@@ -72,9 +72,10 @@ brutRezerv(t) = toplam(çıpa_cuma) + ( disVarlikUsd(t) - disVarlikUsd(çıpa_cu
 # Dolarizasyon: değer_mlr = değer_milyon / 1000
 ypToplam = TP.HPBITABLO4.1/1000 ;  ypYurtici = TP.HPBITABLO4.2/1000
 
-# Swap (seri SONRA gelecek): kullanıcı UI'dan swap stoku (mlr$) girer →
-#   swapHaricNet = NIR - swap   [UI'da caveat: tanım/yükümlülük farkı nedeniyle
-#   üçüncü taraf 'swap hariç net rezerv' rakamına birebir oturmayabilir]
+# Swap (Faz 3'te UI'da uygulandı; EVDS'de stok serisi YOK → manuel input): kullanıcı UI'dan
+#   swap stoku (mlr$) girer (localStorage + ?swap=) → swapHaricNet = NIR - swap
+#   [UI'da "(tqrlab tanımı)" + caveat: tanım/yükümlülük farkı nedeniyle üçüncü taraf
+#   'swap hariç net rezerv' rakamına birebir oturmayabilir]. API'de swap hesabı YOK.
 ```
 **Doğrulama referansı (kabul testi):** çıpa 12-06-2026 toplam=152.08; nowcast 17/18/19-06 = 164.2 / 159.4 / 157.1.
 Baz 27-02-2026 = toplam 210.3 / altın 136.8 / döviz 73.4.
@@ -87,18 +88,21 @@ Baz 27-02-2026 = toplam 210.3 / altın 136.8 / döviz 73.4.
 - **Erişim:** sayfa **public** (Cloudflare Access gating yok).
 
 ## Current Status
-- Phase **2 / 4**: Günlük nowcast + NIR + metric kartlar — ✅ **API kodu tamam; deploy + canlı kabul testi bekliyor**
+- Phase **3 / 4**: Dolarizasyon + manuel swap → swap-hariç net — ✅ **CANLI (deployed)**.
+  API: `tcmb-rezerv-api.tepe-erdinc.workers.dev` · UI: `tqrlab.com/tcmb-rezerv-takip`.
 - Tamamlanan (Faz 1): M-001 (haftalık `fetchSeries`) + M-002 (`computeWeekly`/`weeklyMeta`) +
   M-003 (`GET /api/weekly` + KV cache + CORS + tanımlı hata kodları) + M-004 (haftalık stacked area, tqrlab dark).
-- Tamamlanan (Faz 2 — API): M-001 (+günlük A02/A10/USD; generic `fetchSeries`) + M-002 (`computeDailyNowcast`
-  nowcast + NIR) + M-003 (`GET /api/summary` → `{weekly, daily, meta}`, `DAILY_TTL` KV cache). `/api/weekly` korundu.
-- Doğrulama: `pnpm typecheck` (strict, `any` yok) ✅; `pnpm test` (offline reserve-engine + `/api/summary` mock) ✅;
-  `pnpm dry-run` ✅. CI: `.github/workflows/deploy.yml` (check: typecheck/test/dry-run; deploy+smoke main'de;
-  Node 22 — tip-sıyırma testleri için; smoke /api/weekly + /api/summary yapısal).
-  Kabul testleri offline doğrulandı: nowcast 17/18/19-06 = 164.2/159.4/157.1, NIR_19 ≈ 48.2, çıpa 12-06 = 152.08.
-  Canlı EVDS kabul testi → `wrangler secret put TCMB_EVDS_KEY` + `wrangler deploy` ile.
-- Faz 2 UI (Part B): tqrlab.com Astro repo'sunda `/tcmb-rezerv-takip` → `/api/summary`'ye geçiş + nowcast kuyruğu + kartlar.
-- Dışında (Faz 3): swap (manuel input), `swapHaricNet`, dolarizasyon, cron.
+- Tamamlanan (Faz 2): M-001 (+günlük A02/A10/USD; generic `fetchSeries`) + M-002 (`computeDailyNowcast`
+  nowcast + NIR) + M-003 (`GET /api/summary` → `{weekly, daily, meta}`, `DAILY_TTL` KV cache) + M-004 UI nowcast kuyruğu + kartlar.
+- Tamamlanan (Faz 3 — CANLI): M-001 (+haftalık `TP.HPBITABLO4.1/.2`) + M-002 (`computeDolarizasyon` → `DolarPoint[]`) +
+  M-003 (`/api/summary.dolarizasyon`, **soft-fail**: EVDS hatasında `[]`, çekirdek dashboard düşmez). UI (tqrlab.com repo):
+  dolarizasyon paneli (2 kart + trend) + manuel swap input (localStorage + `?swap=`) → **swap-hariç net (tqrlab tanımı)** + caveat.
+- Doğrulama: `pnpm typecheck` (strict, `any` yok) ✅; `pnpm test` (offline reserve-engine + `/api/summary` mock; 14/14) ✅;
+  `pnpm dry-run` ✅. CI `.github/workflows/deploy.yml` (check + deploy + smoke) **main'de yeşil** — smoke `/api/weekly`
+  (152.08) + `/api/summary` yapısal (+ dolarizasyon alan/tip).
+  Kabul (offline + canlı): çıpa 12-06 = 152.08; nowcast 17/18/19-06 = 164.2/159.4/157.1, NIR_19 ≈ 48.2;
+  **dolarizasyon 12-06 = ypToplam 262.1 / ypYurtici 222.0**.
+- Dışında (Faz 4): cron ön-ısıtma (M-005), light-tema paylaşım/PDF varyantı, swap'ın gerçek stok kaynağı (otomatik besleme).
 - Blocked by: yok.
 
 ## Development Commands
@@ -122,10 +126,10 @@ pnpm build && wrangler pages deploy dist  # ya da mevcut Pages projesine route
 
 | Module | Path | Status | Agent |
 |---|---|---|---|
-| M-001 evds-client | `src/evds-client.ts` | ✅ Faz 1-2 (haftalık + günlük; generic) | sonnet |
-| M-002 reserve-engine | `src/reserve-engine.ts` | ✅ Faz 1-2 (`computeWeekly`/`weeklyMeta`/`computeDailyNowcast`) | opus |
-| M-003 api-worker | `src/index.ts` | ✅ Faz 1-2 (`/api/weekly` + `/api/summary`) | sonnet |
-| M-004 dashboard-ui | `ui/src/pages/tcmb-rezerv-takip.astro` + `ui/src/components/reserve/*` | ✅ Faz 1 (haftalık area); Faz 2 UI tqrlab.com repo'sunda | sonnet |
+| M-001 evds-client | `src/evds-client.ts` | ✅ Faz 1-3 (haftalık + günlük + YP mevduat; generic) | sonnet |
+| M-002 reserve-engine | `src/reserve-engine.ts` | ✅ Faz 1-3 (`computeWeekly`/`weeklyMeta`/`computeDailyNowcast`/`computeDolarizasyon`) | opus |
+| M-003 api-worker | `src/index.ts` | ✅ Faz 1-3 (`/api/weekly` + `/api/summary` [+ `dolarizasyon` soft-fail]) | sonnet |
+| M-004 dashboard-ui | tqrlab.com repo: `src/components/reserve/*` (`ReserveDashboard`/`AreaChart`/`MetricCards`/`Dolarizasyon`/`SwapCard`) | ✅ Faz 1-3 (CANLI) | sonnet |
 | M-005 scheduled-refresh | `src/scheduled.ts` | not started (Faz 4) | haiku |
 
 ## Conventions
