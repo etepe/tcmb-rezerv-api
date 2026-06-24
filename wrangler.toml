@@ -13,3 +13,13 @@ DEFAULT_WEEKLY_START = "01-10-2025"
 binding = "REZERV_CACHE"
 id = "7cadc8955a4647eb9b2f35fc40a032a7"
 # preview_id = "REPLACE_WITH_PREVIEW_KV_ID"   # `wrangler dev` için (opsiyonel)
+
+# Faz 4 — Cron ön-ısıtma (M-005, src/scheduled.ts). Saatler UTC (TR = UTC+3).
+# scheduled() handler summary + weekly cache anahtarını (UI'nin düştüğü anahtarlar)
+# tazeler → kullanıcı (ve CI smoke) hep SICAK cache'e düşer. Public sözleşme DEĞİŞMEZ.
+# Mütevazı sıklık — EVDS dövülmez (~16 tetik/hafta):
+#   "0 8,12,16 * * 1-5" : hafta içi (Pzt-Cum) 08/12/16 UTC = 11/15/19 TR — analitik
+#                         bilanço / iş günü (A02/A10/USD) yayımını yakalar.
+#   "0 17 * * 5"        : Cuma 17 UTC = 20 TR — haftalık brüt rezerv (Cuma) yayımı.
+[triggers]
+crons = ["0 8,12,16 * * 1-5", "0 17 * * 5"]

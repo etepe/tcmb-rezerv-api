@@ -1,0 +1,218 @@
+// M-003/M-005 ortak veri-orkestrasyon katmanı — EVDS çek + hesapla + KV cache.
+// HTTP handler (src/index.ts) ve cron (src/scheduled.ts) AYNI yolu paylaşır (kopya yok):
+//   buildWeekly/buildSummary  → saf üretim (EVDS çek → reserve-engine ile hesapla; KV'ye DOKUNMAZ).
+//   read*/write*Cache         → KV katmanı (TTL + cached damgası).
+// Cron yalnız cache'i ön-ısıtır; PUBLIC API SÖZLEŞMESİ DEĞİŞMEZ.
+// >>> Formüller burada DEĞİL reserve-engine.ts'te; bu katman yalnız orkestrasyon. <<<
+
+import type {
+  DolarPoint,
+  SummaryMeta,
+  SummaryResponse,
+  WeeklyMeta,
+  WeeklyResponse,
+} from "./types.ts";
+import { fetchSeries } from "./evds-client.ts";
+import {
+  computeDailyNowcast,
+  computeDolarizasyon,
+  computeWeekly,
+  EngineError,
+  weeklyMeta,
+} from "./reserve-engine.ts";
+
+/** Worker ortam bağlamı (binding'ler + var'lar). index.ts buradan re-export eder. */
+export interface Env {
+  /** EVDS anahtarı — `wrangler secret put TCMB_EVDS_KEY`. Asla yanıtta/logda. */
+  TCMB_EVDS_KEY: string;
+  /** KV cache namespace. */
+  REZERV_CACHE: KVNamespace;
+  /** Haftalık cache TTL (saniye, string). Varsayılan 21600 (~6 sa). */
+  WEEKLY_TTL?: string;
+  /** Günlük (summary) cache TTL (saniye, string). Varsayılan 3600 (~1 sa). */
+  DAILY_TTL?: string;
+  /** Varsayılan haftalık başlangıç (dd-mm-yyyy). */
+  DEFAULT_WEEKLY_START?: string;
+}
+
+// Seri kodları (evds-client'a verilir; nokta→alt çizgi normalizasyonu engine'de).
+const WEEKLY_CODES = ["TP.AB.TOPLAM", "TP.AB.C2", "TP.AB.C1"];
+const DAILY_CODES = ["TP.AB.A02", "TP.AB.A10", "TP.DK.USD.A.YTL"];
+const DOLARIZASYON_CODES = ["TP.HPBITABLO4.1", "TP.HPBITABLO4.2"];
+
+const DEFAULT_WEEKLY_TTL = 21600; // ~6 saat
+const DEFAULT_DAILY_TTL = 3600; //   ~1 saat (summary; günlük veri daha sık tazelenir)
+/** DEFAULT_WEEKLY_START verilmezse kullanılan başlangıç (dd-mm-yyyy). */
+export const FALLBACK_START = "01-10-2025";
+
+const UNIT = "milyar USD" as const;
+const SOURCE = "TCMB EVDS" as const;
+
+/** Bugünün EVDS `dd-mm-yyyy` formatı (UTC). HTTP handler + cron AYNI anahtarı üretir. */
+export function todayDdMmYyyy(): string {
+  const now = new Date();
+  const dd = String(now.getUTCDate()).padStart(2, "0");
+  const mm = String(now.getUTCMonth() + 1).padStart(2, "0");
+  const yyyy = now.getUTCFullYear();
+  return `${dd}-${mm}-${yyyy}`;
+}
+
+/** ISO `yyyy-mm-dd` → EVDS `dd-mm-yyyy`. Eşleşmezse girdiyi aynen döner. */
+function isoToDdMmYyyy(iso: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : iso;
+}
+
+/** Varsayılan haftalık başlangıç (env > fallback). HTTP handler + cron paylaşır. */
+export function defaultStart(env: Env): string {
+  return env.DEFAULT_WEEKLY_START ?? FALLBACK_START;
+}
+
+/** KV cache anahtarı — /api/weekly. */
+export function weeklyKey(start: string, end: string): string {
+  return `weekly:${start}:${end}`;
+}
+/** KV cache anahtarı — /api/summary (UI'nin düştüğü anahtar). */
+export function summaryKey(start: string, end: string): string {
+  return `summary:${start}:${end}`;
+}
+
+function weeklyTtl(env: Env): number {
+  return Number(env.WEEKLY_TTL ?? "") || DEFAULT_WEEKLY_TTL;
+}
+function summaryTtl(env: Env): number {
+  return Number(env.DAILY_TTL ?? "") || DEFAULT_DAILY_TTL;
+}
+
+/**
+ * Saf üretim: haftalık seri çek → computeWeekly → WeeklyResponse (cached=false).
+ * KV'ye DOKUNMAZ (cache katmanı ayrı). HTTP handler + cron paylaşır.
+ */
+export async function buildWeekly(
+  env: Env,
+  start: string,
+  end: string,
+): Promise<WeeklyResponse> {
+  const rows = await fetchSeries(WEEKLY_CODES, start, end, env.TCMB_EVDS_KEY);
+  const weekly = computeWeekly(rows);
+  const computed = weeklyMeta(weekly);
+  const meta: WeeklyMeta = {
+    ...computed,
+    start,
+    end,
+    updatedAt: new Date().toISOString(),
+    unit: UNIT,
+    source: SOURCE,
+    cached: false,
+  };
+  return { weekly, meta };
+}
+
+/**
+ * Saf üretim: haftalık + günlük nowcast + NIR + dolarizasyon → SummaryResponse
+ * (cached=false). KV'ye DOKUNMAZ. handleSummary'nin eski cache-miss gövdesiyle birebir.
+ *
+ * Dolarizasyon (Faz 3) soft-fail: EVDS'ten çekilemez/boşsa `[]` döner; çekirdek
+ * haftalık/günlük dashboard ikincil panele bağımlı olmaz.
+ *
+ * Hatalar: EvdsError / EngineError (index.ts catch'i tanımlı hata koduna çevirir).
+ */
+export async function buildSummary(
+  env: Env,
+  start: string,
+  end: string,
+): Promise<SummaryResponse> {
+  // 1) Haftalık seri → computeWeekly.
+  const weeklyRows = await fetchSeries(WEEKLY_CODES, start, end, env.TCMB_EVDS_KEY);
+  const weekly = computeWeekly(weeklyRows);
+  const computed = weeklyMeta(weekly);
+
+  // 2) Çıpa = son haftalık nokta; günlük seri [çıpa, end] aralığında çekilir.
+  //    computeWeekly boş seride zaten fırlatır → anchor pratikte hep dolu (savunmacı kontrol).
+  const anchor = weekly[weekly.length - 1];
+  if (!anchor) {
+    throw new EngineError("empty_series", "Çıpa için haftalık veri yok.");
+  }
+  const dailyRows = await fetchSeries(
+    DAILY_CODES,
+    isoToDdMmYyyy(anchor.tarih),
+    end,
+    env.TCMB_EVDS_KEY,
+  );
+  const daily = computeDailyNowcast(weekly, dailyRows);
+  const latestDaily = daily[daily.length - 1];
+
+  // 3) Haftalık dolarizasyon (YP mevduat) — best-effort/soft-fail.
+  let dolarizasyon: DolarPoint[] = [];
+  try {
+    const dolarRows = await fetchSeries(DOLARIZASYON_CODES, start, end, env.TCMB_EVDS_KEY);
+    dolarizasyon = computeDolarizasyon(dolarRows);
+  } catch {
+    dolarizasyon = [];
+  }
+
+  const meta: SummaryMeta = {
+    anchorDate: anchor.tarih,
+    anchorBrut: anchor.toplam,
+    peak: computed.peak,
+    latestWeekly: computed.latest.tarih,
+    latestDaily: latestDaily ? latestDaily.tarih : anchor.tarih,
+    updatedAt: new Date().toISOString(),
+    unit: UNIT,
+    source: SOURCE,
+    cached: false,
+  };
+  return { weekly, daily, dolarizasyon, meta };
+}
+
+/** KV'den weekly oku; varsa cached=true işaretle, yoksa null. */
+export async function readWeeklyCache(
+  env: Env,
+  start: string,
+  end: string,
+): Promise<WeeklyResponse | null> {
+  const hit = await env.REZERV_CACHE.get(weeklyKey(start, end));
+  if (!hit) return null;
+  const parsed = JSON.parse(hit) as WeeklyResponse;
+  parsed.meta.cached = true;
+  return parsed;
+}
+
+/** weekly'yi KV'ye yaz (TTL'li, cached=true damgalı). HTTP miss yolu + cron kullanır. */
+export async function writeWeeklyCache(
+  env: Env,
+  start: string,
+  end: string,
+  payload: WeeklyResponse,
+): Promise<void> {
+  const toCache: WeeklyResponse = { ...payload, meta: { ...payload.meta, cached: true } };
+  await env.REZERV_CACHE.put(weeklyKey(start, end), JSON.stringify(toCache), {
+    expirationTtl: weeklyTtl(env),
+  });
+}
+
+/** KV'den summary oku; varsa cached=true işaretle, yoksa null. */
+export async function readSummaryCache(
+  env: Env,
+  start: string,
+  end: string,
+): Promise<SummaryResponse | null> {
+  const hit = await env.REZERV_CACHE.get(summaryKey(start, end));
+  if (!hit) return null;
+  const parsed = JSON.parse(hit) as SummaryResponse;
+  parsed.meta.cached = true;
+  return parsed;
+}
+
+/** summary'yi KV'ye yaz (TTL'li, cached=true damgalı). HTTP miss yolu + cron kullanır. */
+export async function writeSummaryCache(
+  env: Env,
+  start: string,
+  end: string,
+  payload: SummaryResponse,
+): Promise<void> {
+  const toCache: SummaryResponse = { ...payload, meta: { ...payload.meta, cached: true } };
+  await env.REZERV_CACHE.put(summaryKey(start, end), JSON.stringify(toCache), {
+    expirationTtl: summaryTtl(env),
+  });
+}
