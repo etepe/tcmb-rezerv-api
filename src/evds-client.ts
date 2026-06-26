@@ -81,9 +81,17 @@ export async function fetchSeries(
     throw new EvdsError("evds_unavailable", `EVDS'e ulaşılamadı: ${err.message}`);
   }
 
-  // JSON dönmezse (content-type html) -> anahtar/uç hatası.
+  // JSON dönmezse (content-type html). 5xx -> üst akış geçici olarak erişilemez
+  // (ör. TCMB'nin 00:00-02:00 GMT+3 planlı bakımı 503 HTML döner) → evds_unavailable.
+  // Diğer durumlarda (2xx/4xx + HTML) anahtar/uç sorunu olası → evds_auth_failed.
   const contentType = (res.headers.get("content-type") ?? "").toLowerCase();
   if (!contentType.includes("json")) {
+    if (res.status >= 500) {
+      throw new EvdsError(
+        "evds_unavailable",
+        `EVDS geçici olarak erişilemiyor (HTTP ${res.status}; olası planlı bakım).`,
+      );
+    }
     throw new EvdsError(
       "evds_auth_failed",
       `EVDS JSON dönmedi (HTTP ${res.status}). Anahtar/uç kontrol et.`,

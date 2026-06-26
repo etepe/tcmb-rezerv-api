@@ -14,7 +14,9 @@ import {
   defaultStart,
   type Env,
   readSummaryCache,
+  readSummaryLast,
   readWeeklyCache,
+  readWeeklyLast,
   todayDdMmYyyy,
   writeSummaryCache,
   writeWeeklyCache,
@@ -81,10 +83,17 @@ async function handleWeekly(url: URL, env: Env): Promise<Response> {
   const cached = await readWeeklyCache(env, start, end);
   if (cached) return json(cached, 200);
 
-  // 2) Miss: EVDS'ten çek -> hesapla -> KV yaz (TTL'li).
-  const payload = await buildWeekly(env, start, end);
-  await writeWeeklyCache(env, start, end, payload);
-  return json(payload, 200);
+  // 2) Miss: EVDS'ten çek -> hesapla -> KV yaz (TTL'li). EVDS erişilemezse (ör. TCMB
+  //    planlı bakımı) 5xx fırlatmak yerine son-bilinen-iyi (last-known-good) veriyi sun.
+  try {
+    const payload = await buildWeekly(env, start, end);
+    await writeWeeklyCache(env, start, end, payload);
+    return json(payload, 200);
+  } catch (e) {
+    const stale = await readWeeklyLast(env, start);
+    if (stale) return json(stale, 200);
+    throw e;
+  }
 }
 
 /**
@@ -109,10 +118,17 @@ async function handleSummary(url: URL, env: Env): Promise<Response> {
   const cached = await readSummaryCache(env, start, end);
   if (cached) return json(cached, 200);
 
-  // 2) Miss: çek + hesapla (buildSummary) -> KV yaz (TTL'li).
-  const payload = await buildSummary(env, start, end);
-  await writeSummaryCache(env, start, end, payload);
-  return json(payload, 200);
+  // 2) Miss: çek + hesapla (buildSummary) -> KV yaz (TTL'li). EVDS erişilemezse (ör. TCMB
+  //    planlı bakımı) 5xx fırlatmak yerine son-bilinen-iyi (last-known-good) veriyi sun.
+  try {
+    const payload = await buildSummary(env, start, end);
+    await writeSummaryCache(env, start, end, payload);
+    return json(payload, 200);
+  } catch (e) {
+    const stale = await readSummaryLast(env, start);
+    if (stale) return json(stale, 200);
+    throw e;
+  }
 }
 
 export default {

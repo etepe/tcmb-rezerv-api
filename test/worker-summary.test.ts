@@ -56,6 +56,17 @@ function mockFetchDolarFails(): typeof fetch {
   }) as typeof fetch;
 }
 
+/** Tüm EVDS çağrıları 503 HTML döndürür (TCMB planlı bakım senaryosu). */
+function mockFetchMaintenance(): typeof fetch {
+  return (() =>
+    Promise.resolve(
+      new Response(
+        "<html><body>Scheduled maintenance in progress between 00:00-02:00 (GMT +3)</body></html>",
+        { status: 503, headers: { "content-type": "text/html" } },
+      ),
+    )) as typeof fetch;
+}
+
 /** Map tabanlı sahte KVNamespace (yalnız get/put kullanılır). */
 function makeEnv(): { env: Env; store: Map<string, string> } {
   const store = new Map<string, string>();
@@ -150,6 +161,49 @@ test("/api/summary: ikinci istek KV cache'ten (cached=true), gövde sızıntıs�
     assert.equal(body.meta.cached, true);
     // EVDS anahtarı yanıtta görünmemeli.
     assert.ok(!JSON.stringify(body).includes("test-key-never-logged"));
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("/api/summary: EVDS bakımda (503) + son-bilinen-iyi var -> 200 stale", async () => {
+  const original = globalThis.fetch;
+  const { env, store } = makeEnv();
+  try {
+    // 1) Başarılı istek son-bilinen-iyi havuzunu doldurur.
+    globalThis.fetch = mockFetch();
+    const ok = await callSummary(env);
+    assert.equal(ok.status, 200);
+    assert.ok([...store.keys()].some((k) => k.startsWith("summary:last:")), "last-good yazıldı");
+
+    // 2) EVDS bakıma girer; date-specific cache'i farklı end ile baypas et → build çağrılır.
+    globalThis.fetch = mockFetchMaintenance();
+    const req = new Request(
+      "https://worker.test/api/summary?weeklyStart=01-10-2025&end=28-06-2026",
+    );
+    const res = await worker.fetch(req, env);
+    assert.equal(res.status, 200, "EVDS bakımda olsa da dashboard ayakta (stale)");
+    const body = (await res.json()) as {
+      weekly: unknown[];
+      meta: { cached: boolean; stale?: boolean };
+    };
+    assert.equal(body.meta.stale, true, "stale damgası");
+    assert.equal(body.meta.cached, true);
+    assert.ok(body.weekly.length > 0, "stale veride haftalık dolu");
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("/api/summary: EVDS bakımda (503) + son-bilinen-iyi YOK -> 502 evds_unavailable", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = mockFetchMaintenance();
+  try {
+    const { env } = makeEnv();
+    const res = await callSummary(env);
+    assert.equal(res.status, 502, "fallback yoksa tanımlı hata döner");
+    const body = (await res.json()) as { error: string };
+    assert.equal(body.error, "evds_unavailable", "503 -> evds_unavailable (auth değil)");
   } finally {
     globalThis.fetch = original;
   }
