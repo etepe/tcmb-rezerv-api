@@ -66,6 +66,11 @@ export interface WeeklyMeta extends WeeklyComputedMeta {
   source: "TCMB EVDS";
   /** Bu yanıt KV cache'ten mi geldi. */
   cached: boolean;
+  /**
+   * Üst akış (EVDS) erişilemediğinde son-bilinen-iyi (last-known-good) veri sunuldu.
+   * `updatedAt` bu verinin üretildiği (eski) anı gösterir; UI "X tarihli veri" diyebilir.
+   */
+  stale?: boolean;
 }
 
 /** GET /api/weekly yanıt gövdesi (C-001 haftalık alt kümesi). */
@@ -147,6 +152,11 @@ export interface SummaryMeta {
   swapMb: number;
   /** Bu yanıt KV cache'ten mi geldi. */
   cached: boolean;
+  /**
+   * Üst akış (EVDS) erişilemediğinde son-bilinen-iyi (last-known-good) veri sunuldu.
+   * `updatedAt` bu verinin üretildiği (eski) anı gösterir; UI "X tarihli veri" diyebilir.
+   */
+  stale?: boolean;
 }
 
 /**

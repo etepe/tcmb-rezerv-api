@@ -33,6 +33,11 @@ export interface Env {
   WEEKLY_TTL?: string;
   /** Günlük (summary) cache TTL (saniye, string). Varsayılan 3600 (~1 sa). */
   DAILY_TTL?: string;
+  /**
+   * Son-bilinen-iyi (last-known-good) fallback TTL (saniye, string). EVDS erişilemezken
+   * sunulacak en son başarılı yanıt bu süre KV'de tutulur. Varsayılan 1209600 (~14 gün).
+   */
+  STALE_TTL?: string;
   /** Varsayılan haftalık başlangıç (dd-mm-yyyy). */
   DEFAULT_WEEKLY_START?: string;
   /** Yabancı MB swap fallback (mlr USD, string). K18 çekilemezse kullanılır. Varsayılan 16.4. */
@@ -51,6 +56,7 @@ const MB_CODES = ["TP.DOVVARNC.K18"];
 const DEFAULT_WEEKLY_TTL = 21600; // ~6 saat
 const DEFAULT_DAILY_TTL = 3600; //   ~1 saat (summary; günlük veri daha sık tazelenir)
 const DEFAULT_MB_FALLBACK = 16.4; // Yabancı MB swap fallback (mlr USD) — K18 çekilemezse
+const DEFAULT_STALE_TTL = 1_209_600; // ~14 gün (last-known-good fallback)
 /** DEFAULT_WEEKLY_START verilmezse kullanılan başlangıç (dd-mm-yyyy). */
 export const FALLBACK_START = "01-10-2025";
 
@@ -86,6 +92,17 @@ export function summaryKey(start: string, end: string): string {
   return `summary:${start}:${end}`;
 }
 
+/**
+ * Son-bilinen-iyi (last-known-good) anahtarları — yalnız `start`'a bağlı (end=bugün her gün
+ * değiştiği için ayrı havuz). Her başarılı build bunu da tazeler; EVDS erişilemezken sunulur.
+ */
+export function weeklyLastKey(start: string): string {
+  return `weekly:last:${start}`;
+}
+export function summaryLastKey(start: string): string {
+  return `summary:last:${start}`;
+}
+
 function weeklyTtl(env: Env): number {
   return Number(env.WEEKLY_TTL ?? "") || DEFAULT_WEEKLY_TTL;
 }
@@ -95,6 +112,9 @@ function summaryTtl(env: Env): number {
 /** Yabancı MB swap fallback değeri (env > sabit). K18 çekilemezse kullanılır. */
 function mbFallback(env: Env): number {
   return Number(env.YABANCI_MB_FALLBACK ?? "") || DEFAULT_MB_FALLBACK;
+}
+function staleTtl(env: Env): number {
+  return Number(env.STALE_TTL ?? "") || DEFAULT_STALE_TTL;
 }
 
 /**
@@ -214,7 +234,11 @@ export async function readWeeklyCache(
   return parsed;
 }
 
-/** weekly'yi KV'ye yaz (TTL'li, cached=true damgalı). HTTP miss yolu + cron kullanır. */
+/**
+ * weekly'yi KV'ye yaz (TTL'li, cached=true damgalı). HTTP miss yolu + cron kullanır.
+ * Ayrıca uzun-TTL'li son-bilinen-iyi (last-known-good) havuzunu tazeler → EVDS düşse de
+ * dashboard `readWeeklyLast` ile ayakta kalır.
+ */
 export async function writeWeeklyCache(
   env: Env,
   start: string,
@@ -222,9 +246,31 @@ export async function writeWeeklyCache(
   payload: WeeklyResponse,
 ): Promise<void> {
   const toCache: WeeklyResponse = { ...payload, meta: { ...payload.meta, cached: true } };
-  await env.REZERV_CACHE.put(weeklyKey(start, end), JSON.stringify(toCache), {
-    expirationTtl: weeklyTtl(env),
-  });
+  const serialized = JSON.stringify(toCache);
+  await Promise.all([
+    env.REZERV_CACHE.put(weeklyKey(start, end), serialized, {
+      expirationTtl: weeklyTtl(env),
+    }),
+    env.REZERV_CACHE.put(weeklyLastKey(start), serialized, {
+      expirationTtl: staleTtl(env),
+    }),
+  ]);
+}
+
+/**
+ * Son-bilinen-iyi weekly'yi oku (EVDS erişilemezken fallback). cached=true + stale=true
+ * damgalı; `updatedAt` orijinal (eski) üretim anını korur. Yoksa null.
+ */
+export async function readWeeklyLast(
+  env: Env,
+  start: string,
+): Promise<WeeklyResponse | null> {
+  const hit = await env.REZERV_CACHE.get(weeklyLastKey(start));
+  if (!hit) return null;
+  const parsed = JSON.parse(hit) as WeeklyResponse;
+  parsed.meta.cached = true;
+  parsed.meta.stale = true;
+  return parsed;
 }
 
 /** KV'den summary oku; varsa cached=true işaretle, yoksa null. */
@@ -240,7 +286,11 @@ export async function readSummaryCache(
   return parsed;
 }
 
-/** summary'yi KV'ye yaz (TTL'li, cached=true damgalı). HTTP miss yolu + cron kullanır. */
+/**
+ * summary'yi KV'ye yaz (TTL'li, cached=true damgalı). HTTP miss yolu + cron kullanır.
+ * Ayrıca uzun-TTL'li son-bilinen-iyi (last-known-good) havuzunu tazeler → EVDS düşse de
+ * dashboard `readSummaryLast` ile ayakta kalır.
+ */
 export async function writeSummaryCache(
   env: Env,
   start: string,
@@ -248,7 +298,29 @@ export async function writeSummaryCache(
   payload: SummaryResponse,
 ): Promise<void> {
   const toCache: SummaryResponse = { ...payload, meta: { ...payload.meta, cached: true } };
-  await env.REZERV_CACHE.put(summaryKey(start, end), JSON.stringify(toCache), {
-    expirationTtl: summaryTtl(env),
-  });
+  const serialized = JSON.stringify(toCache);
+  await Promise.all([
+    env.REZERV_CACHE.put(summaryKey(start, end), serialized, {
+      expirationTtl: summaryTtl(env),
+    }),
+    env.REZERV_CACHE.put(summaryLastKey(start), serialized, {
+      expirationTtl: staleTtl(env),
+    }),
+  ]);
+}
+
+/**
+ * Son-bilinen-iyi summary'yi oku (EVDS erişilemezken fallback). cached=true + stale=true
+ * damgalı; `updatedAt` orijinal (eski) üretim anını korur. Yoksa null.
+ */
+export async function readSummaryLast(
+  env: Env,
+  start: string,
+): Promise<SummaryResponse | null> {
+  const hit = await env.REZERV_CACHE.get(summaryLastKey(start));
+  if (!hit) return null;
+  const parsed = JSON.parse(hit) as SummaryResponse;
+  parsed.meta.cached = true;
+  parsed.meta.stale = true;
+  return parsed;
 }
