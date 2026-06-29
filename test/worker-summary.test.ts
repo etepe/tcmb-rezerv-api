@@ -11,16 +11,28 @@ const WEEKLY_ITEMS = [
   { Tarih: "27-02-2026", TP_AB_TOPLAM: "210300", TP_AB_C2: "73400", TP_AB_C1: "136800" },
   { Tarih: "12-06-2026", TP_AB_TOPLAM: "152080", TP_AB_C2: "80000", TP_AB_C1: "72080" },
 ];
+// A11/A14 (Faz 5 swap net dış varlık için) eklendi — nowcast/NIR'i etkilemez (A02/A10/USD kullanır).
 const DAILY_ITEMS = [
-  { Tarih: "12-06-2026", TP_AB_A02: "6400000000", TP_AB_A10: "4600000000", TP_DK_USD_A_YTL: "40" },
-  { Tarih: "17-06-2026", TP_AB_A02: "6884800000", TP_AB_A10: "4650000000", TP_DK_USD_A_YTL: "40" },
-  { Tarih: "18-06-2026", TP_AB_A02: "6692800000", TP_AB_A10: "4660000000", TP_DK_USD_A_YTL: "40" },
-  { Tarih: "19-06-2026", TP_AB_A02: "6600800000", TP_AB_A10: "4672800000", TP_DK_USD_A_YTL: "40" },
+  { Tarih: "12-06-2026", TP_AB_A02: "6400000000", TP_AB_A10: "4600000000", TP_AB_A11: "100000000", TP_AB_A14: "2000000000", TP_DK_USD_A_YTL: "40" },
+  { Tarih: "17-06-2026", TP_AB_A02: "6884800000", TP_AB_A10: "4650000000", TP_AB_A11: "100000000", TP_AB_A14: "2000000000", TP_DK_USD_A_YTL: "40" },
+  { Tarih: "18-06-2026", TP_AB_A02: "6692800000", TP_AB_A10: "4660000000", TP_AB_A11: "100000000", TP_AB_A14: "2000000000", TP_DK_USD_A_YTL: "40" },
+  { Tarih: "19-06-2026", TP_AB_A02: "6600800000", TP_AB_A10: "4672800000", TP_AB_A11: "100000000", TP_AB_A14: "2000000000", TP_DK_USD_A_YTL: "40" },
 ];
 // Faz 3 — haftalık YP mevduat (dolarizasyon). Kabul: 12-06 -> 262.1 / 222.0.
 const DOLAR_ITEMS = [
   { Tarih: "27-02-2026", TP_HPBITABLO4_1: "250000", TP_HPBITABLO4_2: "210000" },
   { Tarih: "12-06-2026", TP_HPBITABLO4_1: "262100", TP_HPBITABLO4_2: "222000" },
+];
+// Faz 5 — swap ayrıştırması. SWAPTEKTAR günlük (yerli banka), DOVVARNC.K18 aylık (yabancı MB).
+const SWAP_ITEMS = [
+  { Tarih: "12-06-2026", TP_SWAPTEKTAR_TOTALSTOKALIMYONLU: "3185", TP_SWAPTEKTAR_TOTALSTOKSATIMYONLU: "1526" },
+  { Tarih: "17-06-2026", TP_SWAPTEKTAR_TOTALSTOKALIMYONLU: "3000", TP_SWAPTEKTAR_TOTALSTOKSATIMYONLU: "1500" },
+  { Tarih: "18-06-2026", TP_SWAPTEKTAR_TOTALSTOKALIMYONLU: "2800", TP_SWAPTEKTAR_TOTALSTOKSATIMYONLU: "1400" },
+  { Tarih: "19-06-2026", TP_SWAPTEKTAR_TOTALSTOKALIMYONLU: "2600", TP_SWAPTEKTAR_TOTALSTOKSATIMYONLU: "1300" },
+];
+const MB_ITEMS = [
+  { Tarih: "2026-5", TP_DOVVARNC_K18: "-16360" },
+  { Tarih: "2026-6", TP_DOVVARNC_K18: "-16310" }, // Haziran -> 16.31
 ];
 
 function jsonResponse(body: unknown): Response {
@@ -34,6 +46,8 @@ function jsonResponse(body: unknown): Response {
 function mockFetch(): typeof fetch {
   return ((input: Request | string | URL) => {
     const url = String(typeof input === "object" && "url" in input ? input.url : input);
+    if (url.includes("TP.SWAPTEKTAR")) return Promise.resolve(jsonResponse({ items: SWAP_ITEMS }));
+    if (url.includes("TP.DOVVARNC")) return Promise.resolve(jsonResponse({ items: MB_ITEMS }));
     if (url.includes("TP.AB.A02")) return Promise.resolve(jsonResponse({ items: DAILY_ITEMS }));
     if (url.includes("TP.HPBITABLO4.1")) return Promise.resolve(jsonResponse({ items: DOLAR_ITEMS }));
     return Promise.resolve(jsonResponse({ items: WEEKLY_ITEMS }));
@@ -45,6 +59,8 @@ function mockFetch(): typeof fetch {
 function mockFetchDolarFails(): typeof fetch {
   return ((input: Request | string | URL) => {
     const url = String(typeof input === "object" && "url" in input ? input.url : input);
+    if (url.includes("TP.SWAPTEKTAR")) return Promise.resolve(jsonResponse({ items: SWAP_ITEMS }));
+    if (url.includes("TP.DOVVARNC")) return Promise.resolve(jsonResponse({ items: MB_ITEMS }));
     if (url.includes("TP.AB.A02")) return Promise.resolve(jsonResponse({ items: DAILY_ITEMS }));
     if (url.includes("TP.HPBITABLO4.1")) {
       return Promise.resolve(new Response("<html>error</html>", {
@@ -52,6 +68,23 @@ function mockFetchDolarFails(): typeof fetch {
         headers: { "content-type": "text/html" },
       }));
     }
+    return Promise.resolve(jsonResponse({ items: WEEKLY_ITEMS }));
+  }) as typeof fetch;
+}
+
+/** Swap (SWAPTEKTAR) çağrısı HTML döndürür -> fetchSeries fırlatır -> swap soft-fail ([]). */
+function mockFetchSwapFails(): typeof fetch {
+  return ((input: Request | string | URL) => {
+    const url = String(typeof input === "object" && "url" in input ? input.url : input);
+    if (url.includes("TP.SWAPTEKTAR")) {
+      return Promise.resolve(new Response("<html>error</html>", {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      }));
+    }
+    if (url.includes("TP.DOVVARNC")) return Promise.resolve(jsonResponse({ items: MB_ITEMS }));
+    if (url.includes("TP.AB.A02")) return Promise.resolve(jsonResponse({ items: DAILY_ITEMS }));
+    if (url.includes("TP.HPBITABLO4.1")) return Promise.resolve(jsonResponse({ items: DOLAR_ITEMS }));
     return Promise.resolve(jsonResponse({ items: WEEKLY_ITEMS }));
   }) as typeof fetch;
 }
@@ -103,6 +136,14 @@ test("/api/summary: shape + nowcast kabul + meta", async () => {
       weekly: { tarih: string; toplam: number }[];
       daily: { tarih: string; brutRezerv: number; nir: number | null }[];
       dolarizasyon: { tarih: string; ypToplam: number; ypYurtici: number }[];
+      swap: {
+        tarih: string;
+        netDahil: number;
+        yabanciMb: number;
+        yerliBanka: number;
+        toplamSwap: number;
+        netHaric: number;
+      }[];
       meta: {
         anchorDate: string;
         anchorBrut: number;
@@ -111,6 +152,8 @@ test("/api/summary: shape + nowcast kabul + meta", async () => {
         latestDaily: string;
         unit: string;
         source: string;
+        swapMbSource: string;
+        swapMb: number;
         cached: boolean;
       };
     };
@@ -126,6 +169,22 @@ test("/api/summary: shape + nowcast kabul + meta", async () => {
     assert.ok(dolar12, "12-06 dolarizasyon noktası var");
     assert.ok(Math.abs(dolar12!.ypToplam - 262.1) < 0.01, "ypToplam 262.1");
     assert.ok(Math.abs(dolar12!.ypYurtici - 222.0) < 0.01, "ypYurtici 222.0");
+
+    // swap (Faz 5) — 4 nokta (12/17/18/19-06); kimlikler + 19-06 değerleri.
+    assert.ok(Array.isArray(body.swap), "swap dizi");
+    assert.equal(body.swap.length, 4, "4 swap noktası");
+    for (const p of body.swap) {
+      assert.ok(Math.abs(p.toplamSwap - (p.yabanciMb + p.yerliBanka)) < 1e-6, "toplam = ymb + yerli");
+      assert.ok(Math.abs(p.netHaric - (p.netDahil - p.toplamSwap)) < 1e-6, "netHaric = netDahil − toplam");
+    }
+    const swap19 = body.swap.find((s) => s.tarih === "2026-06-19");
+    assert.ok(swap19, "19-06 swap noktası var");
+    // 19-06: yerli=(2600−1300)/1000=1.3 ; ymb=|−16310|/1000=16.31 (Haziran K18) ; toplam=17.61
+    assert.ok(Math.abs(swap19!.yerliBanka - 1.3) < 1e-6, "yerli 1.3");
+    assert.ok(Math.abs(swap19!.yabanciMb - 16.31) < 1e-9, "ymb 16.31");
+    assert.ok(Math.abs(swap19!.toplamSwap - 17.61) < 1e-6, "toplam 17.61");
+    assert.equal(body.meta.swapMbSource, "evds:K18");
+    assert.ok(Math.abs(body.meta.swapMb - 16.31) < 1e-9, "meta.swapMb 16.31");
 
     // daily nowcast (kabul)
     const byDate = new Map(body.daily.map((d) => [d.tarih, d]));
@@ -232,6 +291,30 @@ test("/api/summary: dolarizasyon başarısız -> soft-fail ([]) ama 200 + weekly
     assert.ok(Array.isArray(body.dolarizasyon) && body.dolarizasyon.length === 0, "dolarizasyon []");
     assert.ok(body.weekly.length > 0, "haftalık hâlâ dolu");
     assert.ok(body.daily.length > 0, "günlük hâlâ dolu");
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("/api/summary: swap başarısız -> soft-fail ([]) + meta.swapMbSource=fallback, 200 + diğerleri dolu", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = mockFetchSwapFails();
+  try {
+    const { env } = makeEnv();
+    const res = await callSummary(env);
+    assert.equal(res.status, 200, "swap hatası tüm summary'yi düşürmemeli");
+    const body = (await res.json()) as {
+      weekly: unknown[];
+      daily: unknown[];
+      dolarizasyon: unknown[];
+      swap: unknown[];
+      meta: { swapMbSource: string; swapMb: number };
+    };
+    assert.ok(Array.isArray(body.swap) && body.swap.length === 0, "swap []");
+    assert.equal(body.meta.swapMbSource, "fallback", "soft-fail -> fallback");
+    assert.ok(Math.abs(body.meta.swapMb - 16.4) < 1e-9, "fallback 16.4");
+    assert.ok(body.weekly.length > 0 && body.daily.length > 0, "haftalık/günlük dolu");
+    assert.ok(body.dolarizasyon.length > 0, "dolarizasyon dolu");
   } finally {
     globalThis.fetch = original;
   }

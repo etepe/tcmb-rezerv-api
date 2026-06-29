@@ -9,6 +9,7 @@ import type {
   DailyPoint,
   DolarPoint,
   RawRow,
+  SwapPoint,
   WeeklyComputedMeta,
   WeeklyPoint,
 } from "./types.ts";
@@ -34,6 +35,12 @@ const K_USD = "TP_DK_USD_A_YTL"; // TP.DK.USD.A.YTL  — USD alış kuru (TL)
 // Haftalık YP mevduat (dolarizasyon) — milyon USD.
 const K_YP_TOPLAM = "TP_HPBITABLO4_1"; //  TP.HPBITABLO4.1 — toplam YP mevduat
 const K_YP_YURTICI = "TP_HPBITABLO4_2"; // TP.HPBITABLO4.2 — yurt içi yerleşik YP mevduat
+// Swap ayrıştırması (Faz 5).
+const K_A11 = "TP_AB_A11"; //  TP.AB.A11 — yurt dışı yerleşiklere yükümlülük (bin TL)
+const K_A14 = "TP_AB_A14"; //  TP.AB.A14 — bankacılık sektörü YP mevduatı (bin TL)
+const K_SWAP_ALIM = "TP_SWAPTEKTAR_TOTALSTOKALIMYONLU"; //  toplam swap stok, alım yönlü (milyon USD)
+const K_SWAP_SATIM = "TP_SWAPTEKTAR_TOTALSTOKSATIMYONLU"; // toplam swap stok, satım yönlü (milyon USD)
+const K_MB_K18 = "TP_DOVVARNC_K18"; // SDDS 2.2.1.3 (4ay–1yıl swap bacağı) = yabancı-MB swap (milyon USD)
 
 /** RawRow'dan sayısal değer (yalnız number; string/null/undefined -> null). */
 function num(row: RawRow, key: string): number | null {
@@ -194,4 +201,112 @@ export function computeDolarizasyon(rows: RawRow[]): DolarPoint[] {
   }
   points.sort((a, b) => a.tarih.localeCompare(b.tarih));
   return points;
+}
+
+/**
+ * Tarih dizgesinden karşılaştırılabilir ay anahtarı `yyyy-mm` üretir.
+ * EVDS aylık seri `yyyy-m`/`yyyy-mm`, günlük `dd-mm-yyyy`, ISO `yyyy-mm-dd` formatlarını kabul eder.
+ */
+function monthKey(tarih: string): string {
+  const t = tarih.trim();
+  const ym = /^(\d{4})-(\d{1,2})(?:-\d{1,2})?$/.exec(t); // yyyy-m / yyyy-mm / yyyy-mm-dd
+  if (ym) return `${ym[1]}-${ym[2]!.padStart(2, "0")}`;
+  const dmy = /^(\d{2})-(\d{2})-(\d{4})$/.exec(t); // dd-mm-yyyy
+  if (dmy) return `${dmy[3]}-${dmy[2]}`;
+  return t;
+}
+
+/** computeSwapSplit sonucu — noktalar + Yabancı MB kaynağı/değeri (meta için). */
+export interface SwapSplit {
+  points: SwapPoint[];
+  /** Yabancı MB K18 aylık serisinden mi (`evds:K18`) yoksa fallback sabitinden mi geldi. */
+  mbSource: "evds:K18" | "fallback";
+  /** En güncel noktada kullanılan Yabancı MB değeri (milyar USD). */
+  mb: number;
+}
+
+/**
+ * Günlük swap ayrıştırması + swap hariç net dış varlık (Faz 5 — saf, yan etkisiz).
+ * Kaynak: research-swap-split-method.md (42 analist tablosu + canlı EVDS ile doğrulandı).
+ *
+ *   netDahil(t)   = (A02 − A11 − A14) / USD / 1e6                  (≡ NIR + A13)
+ *   yerliBanka(t) = (SWAP_ALIM − SWAP_SATIM) / 1000               (günlük, +alım/−satım)
+ *   yabanciMb     = |K18| / 1000  (aylık adım: o ayın değeri, yoksa en yakın önceki ay;
+ *                                  hiç K18 yoksa `fallbackMb`)
+ *   toplamSwap    = yabanciMb + yerliBanka ;  netHaric = netDahil − toplamSwap
+ *
+ * - `dailyRows`: computeDailyNowcast ile AYNI günlük satırlar (A02/A11/A14/USD içerir).
+ * - A02/USD olmayan günler atlanır (nowcast deseni). Belirli güne ait SWAPTEKTAR satırı
+ *   yoksa (alım ve satım birlikte null) o gün ATLANIR — değer uydurulmaz.
+ * - Soft-fail dostu: hiç nokta yoksa boş sonuç döner (fırlatmaz); buildSummary'de try/catch sarmalı.
+ */
+export function computeSwapSplit(
+  dailyRows: RawRow[],
+  swapRows: RawRow[],
+  mbRows: RawRow[],
+  fallbackMb: number,
+): SwapSplit {
+  // 1) Yabancı MB aylık adım serisi: |K18|/1000, ay anahtarına göre artan sıralı.
+  const mbByMonth: { month: string; mb: number }[] = [];
+  for (const r of mbRows) {
+    const v = num(r, K_MB_K18);
+    if (v === null) continue;
+    mbByMonth.push({ month: monthKey(r.tarih), mb: Math.abs(v) / 1000 });
+  }
+  mbByMonth.sort((a, b) => a.month.localeCompare(b.month));
+  const hasMb = mbByMonth.length > 0;
+
+  // Bir güne ait Yabancı MB: o ayın K18'i; yoksa en yakın önceki ay; o da yoksa en erken; hiç yoksa fallback.
+  const mbFor = (iso: string): number => {
+    if (!hasMb) return fallbackMb;
+    const mk = monthKey(iso);
+    let chosen = mbByMonth[0]!.mb; // mk tüm verilerden önceyse en erken ayı kullan
+    for (const e of mbByMonth) {
+      if (e.month <= mk) chosen = e.mb;
+      else break;
+    }
+    return chosen;
+  };
+
+  // 2) SWAPTEKTAR günlük: ISO tarih -> (alım, satım) stok.
+  const swapByDate = new Map<string, { alim: number | null; satim: number | null }>();
+  for (const r of swapRows) {
+    swapByDate.set(isoDate(r.tarih), {
+      alim: num(r, K_SWAP_ALIM),
+      satim: num(r, K_SWAP_SATIM),
+    });
+  }
+
+  // 3) Günlük satırları dolaş; A02/USD ve swap verisi olan günler için SwapPoint üret.
+  const points: SwapPoint[] = [];
+  for (const r of dailyRows) {
+    const a02 = num(r, K_A02);
+    const usd = num(r, K_USD);
+    if (a02 === null || a02 === 0 || usd === null || usd === 0) continue;
+    const iso = isoDate(r.tarih);
+    const sw = swapByDate.get(iso);
+    if (!sw || (sw.alim === null && sw.satim === null)) continue; // swap verisi yok -> uydurma
+    const a11 = num(r, K_A11);
+    const a14 = num(r, K_A14);
+    const netDahil = (a02 - (a11 ?? 0) - (a14 ?? 0)) / usd / 1e6;
+    const yerliBanka = ((sw.alim ?? 0) - (sw.satim ?? 0)) / 1000;
+    const yabanciMb = mbFor(iso);
+    const toplamSwap = yabanciMb + yerliBanka;
+    points.push({
+      tarih: iso,
+      netDahil,
+      yabanciMb,
+      yerliBanka,
+      toplamSwap,
+      netHaric: netDahil - toplamSwap,
+    });
+  }
+  points.sort((a, b) => a.tarih.localeCompare(b.tarih));
+
+  const last = points[points.length - 1];
+  return {
+    points,
+    mbSource: hasMb ? "evds:K18" : "fallback",
+    mb: last ? last.yabanciMb : fallbackMb,
+  };
 }

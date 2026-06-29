@@ -8,6 +8,7 @@ WEEKLY_TTL = "21600"            # haftalık cache TTL (~6 saat) — /api/weekly
 DAILY_TTL = "3600"              # günlük/summary cache TTL (~1 saat) — /api/summary
 STALE_TTL = "1209600"           # son-bilinen-iyi fallback TTL (~14 gün) — EVDS bakım/kesintisinde sunulur
 DEFAULT_WEEKLY_START = "01-10-2025"
+YABANCI_MB_FALLBACK = "16.4"    # Yabancı MB swap fallback (mlr USD) — DOVVARNC.K18 çekilemezse (Faz 5)
 
 # KV cache. id'yi `wrangler kv namespace create REZERV_CACHE` çıktısıyla doldur.
 [[kv_namespaces]]
