@@ -1,7 +1,8 @@
 // M-001..M-004 ortak tipleri. `any` yok; tüm dış değerler buradan geçer.
 // Faz 1: HAFTALIK brüt rezerv. Faz 2: + GÜNLÜK nowcast + NIR (`/api/summary`).
 // Faz 3: + HAFTALIK dolarizasyon (YP mevduat) `/api/summary.dolarizasyon`.
-// (Swap manuel input UI tarafında — API'de swap hesabı YOK.)
+// Faz 5: + GÜNLÜK swap ayrıştırması (`/api/summary.swap`): Yerli banka SWAPTEKTAR'dan,
+//        Yabancı MB DOVVARNC.K18'den (aylık adım, fallback sabiti) → net dış varlık (swap hariç).
 
 /** Tanımlı API/iç hata kodları (contract C-001 / C-002 / C-003 / C-004). */
 export type ApiErrorCode =
@@ -101,6 +102,29 @@ export interface DolarPoint {
   ypYurtici: number;
 }
 
+/**
+ * Günlük swap ayrıştırması + swap hariç net dış varlık (Faz 5). Hepsi milyar USD.
+ * Doğrulanmış yöntem (research-swap-split-method.md):
+ *   netDahil  = (TP.AB.A02 − TP.AB.A11 − TP.AB.A14) / USD / 1e6   (≡ NIR + A13)
+ *   yerliBanka= (TP.SWAPTEKTAR.TOTALSTOKALIMYONLU − …SATIMYONLU) / 1000   (günlük)
+ *   yabanciMb = |TP.DOVVARNC.K18| / 1000   (aylık adım; çekilemezse fallback sabiti)
+ *   toplamSwap= yabanciMb + yerliBanka ;  netHaric = netDahil − toplamSwap
+ */
+export interface SwapPoint {
+  /** ISO tarih `yyyy-mm-dd`. */
+  tarih: string;
+  /** Net dış varlık (swap dahil) — (A02−A11−A14)/USD/1e6. */
+  netDahil: number;
+  /** Yabancı MB swapı (aylık adım; |K18|/1000 ya da fallback). */
+  yabanciMb: number;
+  /** Yerli banka swapı (SWAPTEKTAR net stoku, +alım/−satım). */
+  yerliBanka: number;
+  /** Toplam swap (net, stok) = yabanciMb + yerliBanka. */
+  toplamSwap: number;
+  /** Net dış varlık (swap hariç) = netDahil − toplamSwap. */
+  netHaric: number;
+}
+
 /** /api/summary yanıt meta'sı (C-001). Faz 2: haftalık + günlük çıpa bağlamı. */
 export interface SummaryMeta {
   /** Nowcast çıpası = aralıktaki son resmi haftalık Cuma (ISO). */
@@ -117,18 +141,23 @@ export interface SummaryMeta {
   updatedAt: string;
   unit: "milyar USD";
   source: "TCMB EVDS";
+  /** Swap Yabancı MB bileşeninin kaynağı: K18 aylık serisi mi, fallback sabiti mi (Faz 5). */
+  swapMbSource: "evds:K18" | "fallback";
+  /** En güncel swap noktasında kullanılan Yabancı MB değeri (milyar USD, Faz 5). */
+  swapMb: number;
   /** Bu yanıt KV cache'ten mi geldi. */
   cached: boolean;
 }
 
 /**
  * GET /api/summary yanıt gövdesi (C-001).
- * Faz 3: + `dolarizasyon` (haftalık YP mevduat). EVDS'ten çekilemezse soft-fail ile
- * boş dizi döner (çekirdek haftalık/günlük dashboard düşmez).
+ * Faz 3: + `dolarizasyon` (haftalık YP mevduat). Faz 5: + `swap` (günlük swap ayrıştırması).
+ * Her ikisi de EVDS'ten çekilemezse soft-fail ile boş dizi döner (çekirdek haftalık/günlük dashboard düşmez).
  */
 export interface SummaryResponse {
   weekly: WeeklyPoint[];
   daily: DailyPoint[];
   dolarizasyon: DolarPoint[];
+  swap: SwapPoint[];
   meta: SummaryMeta;
 }

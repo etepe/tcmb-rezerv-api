@@ -9,6 +9,7 @@ import type {
   DolarPoint,
   SummaryMeta,
   SummaryResponse,
+  SwapPoint,
   WeeklyMeta,
   WeeklyResponse,
 } from "./types.ts";
@@ -16,6 +17,7 @@ import { fetchSeries } from "./evds-client.ts";
 import {
   computeDailyNowcast,
   computeDolarizasyon,
+  computeSwapSplit,
   computeWeekly,
   EngineError,
   weeklyMeta,
@@ -33,15 +35,22 @@ export interface Env {
   DAILY_TTL?: string;
   /** Varsayılan haftalık başlangıç (dd-mm-yyyy). */
   DEFAULT_WEEKLY_START?: string;
+  /** Yabancı MB swap fallback (mlr USD, string). K18 çekilemezse kullanılır. Varsayılan 16.4. */
+  YABANCI_MB_FALLBACK?: string;
 }
 
 // Seri kodları (evds-client'a verilir; nokta→alt çizgi normalizasyonu engine'de).
 const WEEKLY_CODES = ["TP.AB.TOPLAM", "TP.AB.C2", "TP.AB.C1"];
-const DAILY_CODES = ["TP.AB.A02", "TP.AB.A10", "TP.DK.USD.A.YTL"];
+// Günlük: A02/A10/USD nowcast+NIR; A11/A14 swap ayrıştırması (net dış varlık) için (Faz 5).
+const DAILY_CODES = ["TP.AB.A02", "TP.AB.A10", "TP.AB.A11", "TP.AB.A14", "TP.DK.USD.A.YTL"];
 const DOLARIZASYON_CODES = ["TP.HPBITABLO4.1", "TP.HPBITABLO4.2"];
+// Swap (Faz 5): SWAPTEKTAR günlük (yerli banka), DOVVARNC.K18 aylık (yabancı MB).
+const SWAP_CODES = ["TP.SWAPTEKTAR.TOTALSTOKALIMYONLU", "TP.SWAPTEKTAR.TOTALSTOKSATIMYONLU"];
+const MB_CODES = ["TP.DOVVARNC.K18"];
 
 const DEFAULT_WEEKLY_TTL = 21600; // ~6 saat
 const DEFAULT_DAILY_TTL = 3600; //   ~1 saat (summary; günlük veri daha sık tazelenir)
+const DEFAULT_MB_FALLBACK = 16.4; // Yabancı MB swap fallback (mlr USD) — K18 çekilemezse
 /** DEFAULT_WEEKLY_START verilmezse kullanılan başlangıç (dd-mm-yyyy). */
 export const FALLBACK_START = "01-10-2025";
 
@@ -82,6 +91,10 @@ function weeklyTtl(env: Env): number {
 }
 function summaryTtl(env: Env): number {
   return Number(env.DAILY_TTL ?? "") || DEFAULT_DAILY_TTL;
+}
+/** Yabancı MB swap fallback değeri (env > sabit). K18 çekilemezse kullanılır. */
+function mbFallback(env: Env): number {
+  return Number(env.YABANCI_MB_FALLBACK ?? "") || DEFAULT_MB_FALLBACK;
 }
 
 /**
@@ -151,6 +164,27 @@ export async function buildSummary(
     dolarizasyon = [];
   }
 
+  // 4) Swap ayrıştırması (Faz 5) — best-effort/soft-fail. Yerli banka SWAPTEKTAR'dan (günlük,
+  //    [çıpa,end]), Yabancı MB DOVVARNC.K18'den (aylık adım, [start,end]); fallback sabiti env'den.
+  //    dailyRows (A02/A11/A14/USD) yeniden kullanılır — ek A02 çekilmez.
+  let swap: SwapPoint[] = [];
+  let swapMbSource: SummaryMeta["swapMbSource"] = "fallback";
+  let swapMb = mbFallback(env);
+  try {
+    const [swapRows, mbRows] = await Promise.all([
+      fetchSeries(SWAP_CODES, isoToDdMmYyyy(anchor.tarih), end, env.TCMB_EVDS_KEY),
+      fetchSeries(MB_CODES, start, end, env.TCMB_EVDS_KEY),
+    ]);
+    const split = computeSwapSplit(dailyRows, swapRows, mbRows, mbFallback(env));
+    swap = split.points;
+    swapMbSource = split.mbSource;
+    swapMb = split.mb;
+  } catch {
+    swap = [];
+    swapMbSource = "fallback";
+    swapMb = mbFallback(env);
+  }
+
   const meta: SummaryMeta = {
     anchorDate: anchor.tarih,
     anchorBrut: anchor.toplam,
@@ -160,9 +194,11 @@ export async function buildSummary(
     updatedAt: new Date().toISOString(),
     unit: UNIT,
     source: SOURCE,
+    swapMbSource,
+    swapMb,
     cached: false,
   };
-  return { weekly, daily, dolarizasyon, meta };
+  return { weekly, daily, dolarizasyon, swap, meta };
 }
 
 /** KV'den weekly oku; varsa cached=true işaretle, yoksa null. */

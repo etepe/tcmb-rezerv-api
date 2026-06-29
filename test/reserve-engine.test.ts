@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import {
   computeDailyNowcast,
   computeDolarizasyon,
+  computeSwapSplit,
   computeWeekly,
   EngineError,
   weeklyMeta,
@@ -151,4 +152,75 @@ test("computeDolarizasyon: boş seri -> empty_series", () => {
     () => computeDolarizasyon([{ tarih: "01-01-2026", TP_HPBITABLO4_1: null }]),
     (e: unknown) => e instanceof EngineError && e.code === "empty_series",
   );
+});
+
+// --- Faz 5: computeSwapSplit (swap ayrıştırması + net dış varlık swap hariç) -----
+// USD=40. netDahil=(A02−A11−A14)/USD/1e6. 06-04 hedef netDahil=50 -> A02−A11−A14=2e9.
+// yerli=(13517−1803)/1000=11.714 ; ymb=|−16310|/1000=16.31 ; toplam=28.024 ; netHaric=21.976.
+const swapDaily: RawRow[] = [
+  {
+    tarih: "06-04-2026",
+    TP_AB_A02: 6_400_000_000,
+    TP_AB_A11: 400_000_000,
+    TP_AB_A14: 4_000_000_000,
+    TP_AB_A10: 4_000_000_000,
+    TP_DK_USD_A_YTL: 40,
+  },
+];
+const swapStok: RawRow[] = [
+  { tarih: "06-04-2026", TP_SWAPTEKTAR_TOTALSTOKALIMYONLU: 13517, TP_SWAPTEKTAR_TOTALSTOKSATIMYONLU: 1803 },
+];
+const mbStok: RawRow[] = [
+  { tarih: "2026-3", TP_DOVVARNC_K18: -16130 }, // Mart -> 16.13
+  { tarih: "2026-4", TP_DOVVARNC_K18: -16310 }, // Nisan -> 16.31
+];
+
+test("computeSwapSplit: kabul (netDahil/yerli/ymb/toplam/netHaric)", () => {
+  const r = computeSwapSplit(swapDaily, swapStok, mbStok, 16.4);
+  assert.equal(r.mbSource, "evds:K18");
+  assert.equal(r.points.length, 1);
+  const p = r.points[0]!;
+  assert.equal(p.tarih, "2026-04-06");
+  assert.ok(Math.abs(p.netDahil - 50) < 1e-6, "netDahil 50");
+  assert.ok(Math.abs(p.yerliBanka - 11.714) < 1e-6, "yerli 11.714");
+  assert.ok(Math.abs(p.yabanciMb - 16.31) < 1e-9, "ymb 16.31 (Nisan K18)");
+  assert.ok(Math.abs(p.toplamSwap - 28.024) < 1e-6, "toplam 28.024");
+  assert.ok(Math.abs(p.netHaric - 21.976) < 1e-6, "netHaric 21.976");
+  assert.ok(Math.abs(r.mb - 16.31) < 1e-9, "meta mb = son nokta ymb");
+});
+
+test("computeSwapSplit: ay-adımı — her gün kendi ayının K18'ini alır", () => {
+  const daily: RawRow[] = [
+    { tarih: "31-03-2026", TP_AB_A02: 4_000_000_000, TP_AB_A11: 0, TP_AB_A14: 0, TP_DK_USD_A_YTL: 40 },
+    { tarih: "06-04-2026", TP_AB_A02: 4_000_000_000, TP_AB_A11: 0, TP_AB_A14: 0, TP_DK_USD_A_YTL: 40 },
+  ];
+  const stok: RawRow[] = [
+    { tarih: "31-03-2026", TP_SWAPTEKTAR_TOTALSTOKALIMYONLU: 0, TP_SWAPTEKTAR_TOTALSTOKSATIMYONLU: 0 },
+    { tarih: "06-04-2026", TP_SWAPTEKTAR_TOTALSTOKALIMYONLU: 0, TP_SWAPTEKTAR_TOTALSTOKSATIMYONLU: 0 },
+  ];
+  const r = computeSwapSplit(daily, stok, mbStok, 16.4);
+  const byDate = new Map(r.points.map((p) => [p.tarih, p]));
+  assert.ok(Math.abs((byDate.get("2026-03-31")?.yabanciMb ?? 0) - 16.13) < 1e-9, "Mart -> 16.13");
+  assert.ok(Math.abs((byDate.get("2026-04-06")?.yabanciMb ?? 0) - 16.31) < 1e-9, "Nisan -> 16.31");
+});
+
+test("computeSwapSplit: K18 yoksa fallback sabiti + mbSource=fallback", () => {
+  const r = computeSwapSplit(swapDaily, swapStok, [], 16.4);
+  assert.equal(r.mbSource, "fallback");
+  assert.equal(r.points[0]?.yabanciMb, 16.4);
+  assert.ok(Math.abs((r.points[0]?.toplamSwap ?? 0) - (16.4 + 11.714)) < 1e-6);
+});
+
+test("computeSwapSplit: swap satırı olmayan / A02 olmayan gün atlanır", () => {
+  const daily: RawRow[] = [
+    // swap satırı yok -> atlanır
+    { tarih: "06-04-2026", TP_AB_A02: 6_400_000_000, TP_AB_A11: 0, TP_AB_A14: 0, TP_DK_USD_A_YTL: 40 },
+    // A02 yok -> atlanır
+    { tarih: "07-04-2026", TP_AB_A02: null, TP_DK_USD_A_YTL: 40 },
+  ];
+  const stok: RawRow[] = [
+    { tarih: "07-04-2026", TP_SWAPTEKTAR_TOTALSTOKALIMYONLU: 100, TP_SWAPTEKTAR_TOTALSTOKSATIMYONLU: 0 },
+  ];
+  const r = computeSwapSplit(daily, stok, mbStok, 16.4);
+  assert.equal(r.points.length, 0, "iki gün de atlanmalı");
 });

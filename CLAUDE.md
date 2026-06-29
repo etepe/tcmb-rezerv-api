@@ -72,10 +72,14 @@ brutRezerv(t) = toplam(çıpa_cuma) + ( disVarlikUsd(t) - disVarlikUsd(çıpa_cu
 # Dolarizasyon: değer_mlr = değer_milyon / 1000
 ypToplam = TP.HPBITABLO4.1/1000 ;  ypYurtici = TP.HPBITABLO4.2/1000
 
-# Swap (Faz 3'te UI'da uygulandı; EVDS'de stok serisi YOK → manuel input): kullanıcı UI'dan
-#   swap stoku (mlr$) girer (localStorage + ?swap=) → swapHaricNet = NIR - swap
-#   [UI'da "(tqrlab tanımı)" + caveat: tanım/yükümlülük farkı nedeniyle üçüncü taraf
-#   'swap hariç net rezerv' rakamına birebir oturmayabilir]. API'de swap hesabı YOK.
+# Swap AYRIŞTIRMASI — Faz 5'te API'ye KODLANDI (/api/summary.swap). Bkz. research-swap-split-method.md.
+#   yerli_banka = (TP.SWAPTEKTAR.TOTALSTOKALIMYONLU − …TOTALSTOKSATIMYONLU)/1000   # GÜNLÜK, EVDS oto
+#   yabanci_mb  = |TP.DOVVARNC.K18|/1000  # AYLIK adım (oto); K18 çekilemezse env YABANCI_MB_FALLBACK=16.4
+#   toplam_swap = yabanci_mb + yerli_banka ;  net_dahil = (A02−A11−A14)/USD/1e6 (≡ NIR + A13)
+#   swapHaricNet = net_dahil − toplam_swap   # 41 analist tablosu: ort artık ~0,3 mlr (08.04+ : ≤0,5)
+#   SummaryResponse.swap: SwapPoint[]; meta.swapMbSource ("evds:K18"|"fallback") + meta.swapMb. Soft-fail ([]).
+#   [TODO UI (tqrlab.com): manuel ?swap= girdisini KALDIR → API'nin swap'ını tüket. Caveat korunur:
+#    "swap hariç net rezerv" kanonik değil → üçüncü taraf rakamına birebir oturmayabilir.]
 ```
 **Doğrulama referansı (kabul testi):** çıpa 12-06-2026 toplam=152.08; nowcast 17/18/19-06 = 164.2 / 159.4 / 157.1.
 Baz 27-02-2026 = toplam 210.3 / altın 136.8 / döviz 73.4.
@@ -112,10 +116,13 @@ Baz 27-02-2026 = toplam 210.3 / altın 136.8 / döviz 73.4.
   print bozulmaz); "Yazdır / PDF" (dark→light→print→restore) + "Paylaşım linki" (`?theme=light&swap=` panoya)
   araç çubuğu; swap girişi `no-print` (değer kart+notta kalır). tqrlab küçük harf + caveat paylaşım/PDF'te korunur.
   Doğrulama: `astro build` ✅; `astro check` 0 yeni hata; tarayıcı testi (dark/light/?print/mobil/paylaş/yazdır) ✅.
-- Faz 4 — Part C (araştırma, opsiyonel): swap gerçek stok kaynağı → **kısmi/belirsiz, manuel KALDI**. EVDS'te
-  swap-ilişkili seriler aslında VAR (IMF rezerv şablonu `4003/bie_ulusdovlkd` aylık forward/swap kısa pozisyon;
-  "TCMB Taraflı Swap İşlemleri" günlük akım+stok, 2021'den) ama analist "swap hariç net" stok tanımına birebir
-  oturmaz (tanım farkı + yabancı MB swap'ı ayrı yayımlanmıyor + leaf kodları doğrulanmadı). Bkz. memory.
+- Faz 4 — Part C (araştırma) → **ÇÖZÜLDÜ (2026-06-29 · research-swap-split-method.md).** 41 günlük analist
+  tablosu (`Rezerv/`) + canlı EVDS: swap **AYRIŞIYOR** → Yerli banka = `TP.SWAPTEKTAR.TOTALSTOK(ALIM−SATIM)YONLU`/1000
+  (GÜNLÜK, kesin; artık ≤0,33), Yabancı MB = 16,4 bakımlı sabit. swapHaricNet = (A02−A11−A14)/USD − 16,4 −
+  SWAPTEKTAR_net → 40 noktada ort 0,3 mlr (08.04 sonrası 31/31 ≤0,5; erken offset analistin eski tablo tabanı).
+  Önceki "manuel KALDI" sonucu (research-swap-nir-reproduction.md) düzeltildi → **Faz 5'te API'ye kodlandı**
+  (`/api/summary.swap`; `computeSwapSplit`; K18 oto + `YABANCI_MB_FALLBACK`=16.4; soft-fail). UI manuel-input
+  kaldırma (tqrlab.com) bekliyor. typecheck + 21/21 test + dry-run + canlı smoke ✅.
 - Blocked by: yok. **Çekirdek dashboard + sertleştirme TAMAM (Faz 1-4 CANLI).**
 
 ## Development Commands
