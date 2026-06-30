@@ -14,9 +14,11 @@ import type {
   WeeklyResponse,
 } from "./types.ts";
 import { fetchSeries } from "./evds-client.ts";
+import { fetchGoldUsdByDate } from "./gold-client.ts";
 import {
   computeDailyNowcast,
   computeDolarizasyon,
+  computeGoldPriceEffect,
   computeSwapSplit,
   computeWeekly,
   EngineError,
@@ -76,6 +78,12 @@ export function todayDdMmYyyy(): string {
 function isoToDdMmYyyy(iso: string): string {
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
   return m ? `${m[3]}-${m[2]}-${m[1]}` : iso;
+}
+
+/** EVDS `dd-mm-yyyy` → ISO `yyyy-mm-dd`. Eşleşmezse girdiyi aynen döner (altın fiyatı aralığı). */
+function ddMmYyyyToIso(s: string): string {
+  const m = /^(\d{2})-(\d{2})-(\d{4})$/.exec(s.trim());
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : s;
 }
 
 /** Varsayılan haftalık başlangıç (env > fallback). HTTP handler + cron paylaşır. */
@@ -172,8 +180,22 @@ export async function buildSummary(
     end,
     env.TCMB_EVDS_KEY,
   );
-  const daily = computeDailyNowcast(weekly, dailyRows);
+  let daily = computeDailyNowcast(weekly, dailyRows);
   const latestDaily = daily[daily.length - 1];
+
+  // 2b) Altın-fiyat etkisi (Faz 6) — best-effort/soft-fail. HARİCİ (EVDS-dışı) günlük altın
+  //     fiyatı [çıpa, end] aralığında çekilir; computeGoldPriceEffect daily[].goldPriceEffect'i
+  //     doldurur. Çekilemezse goldPriceEffect null kalır + goldPriceSource "unavailable"
+  //     (çekirdek nowcast/NIR düşmez).
+  let goldPriceSource: SummaryMeta["goldPriceSource"] = "unavailable";
+  try {
+    const goldUsdByDate = await fetchGoldUsdByDate(anchor.tarih, ddMmYyyyToIso(end));
+    daily = computeGoldPriceEffect(weekly, daily, goldUsdByDate);
+    // Hiç noktaya etki yazılamadıysa (oran kurulamadı) kaynağı "unavailable" tut.
+    if (daily.some((d) => d.goldPriceEffect !== null)) goldPriceSource = "external:yahoo-gcf";
+  } catch {
+    goldPriceSource = "unavailable";
+  }
 
   // 3) Haftalık dolarizasyon (YP mevduat) — best-effort/soft-fail.
   let dolarizasyon: DolarPoint[] = [];
@@ -216,6 +238,7 @@ export async function buildSummary(
     source: SOURCE,
     swapMbSource,
     swapMb,
+    goldPriceSource,
     cached: false,
   };
   return { weekly, daily, dolarizasyon, swap, meta };

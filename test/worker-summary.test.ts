@@ -35,6 +35,23 @@ const MB_ITEMS = [
   { Tarih: "2026-6", TP_DOVVARNC_K18: "-16310" }, // Haziran -> 16.31
 ];
 
+// Faz 6 — harici altın fiyatı (Yahoo GC=F chart). Çıpa 12-06 fiyat 4000; 19-06 4040.
+//   anchorAltin = C1(12-06)/1000 = 72.08 → etki_19 = 72.08×(4040/4000−1) = 0.7208.
+const GOLD_ENTRIES: [string, number][] = [
+  ["2026-06-12", 4000],
+  ["2026-06-17", 4200],
+  ["2026-06-18", 4100],
+  ["2026-06-19", 4040],
+];
+function goldChartResponse(entries: [string, number][]): Response {
+  const timestamp = entries.map(([iso]) => {
+    const [y, m, d] = iso.split("-").map(Number);
+    return Math.floor(Date.UTC(y!, m! - 1, d!) / 1000);
+  });
+  const close = entries.map(([, p]) => p);
+  return jsonResponse({ chart: { result: [{ timestamp, indicators: { quote: [{ close }] } }] } });
+}
+
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
     status: 200,
@@ -46,6 +63,20 @@ function jsonResponse(body: unknown): Response {
 function mockFetch(): typeof fetch {
   return ((input: Request | string | URL) => {
     const url = String(typeof input === "object" && "url" in input ? input.url : input);
+    if (url.includes("yahoo.com")) return Promise.resolve(goldChartResponse(GOLD_ENTRIES));
+    if (url.includes("TP.SWAPTEKTAR")) return Promise.resolve(jsonResponse({ items: SWAP_ITEMS }));
+    if (url.includes("TP.DOVVARNC")) return Promise.resolve(jsonResponse({ items: MB_ITEMS }));
+    if (url.includes("TP.AB.A02")) return Promise.resolve(jsonResponse({ items: DAILY_ITEMS }));
+    if (url.includes("TP.HPBITABLO4.1")) return Promise.resolve(jsonResponse({ items: DOLAR_ITEMS }));
+    return Promise.resolve(jsonResponse({ items: WEEKLY_ITEMS }));
+  }) as typeof fetch;
+}
+
+/** Altın fiyatı (Yahoo) çağrısı 500 döner -> gold soft-fail (goldPriceEffect null, kaynak unavailable). */
+function mockFetchGoldFails(): typeof fetch {
+  return ((input: Request | string | URL) => {
+    const url = String(typeof input === "object" && "url" in input ? input.url : input);
+    if (url.includes("yahoo.com")) return Promise.resolve(new Response("err", { status: 500 }));
     if (url.includes("TP.SWAPTEKTAR")) return Promise.resolve(jsonResponse({ items: SWAP_ITEMS }));
     if (url.includes("TP.DOVVARNC")) return Promise.resolve(jsonResponse({ items: MB_ITEMS }));
     if (url.includes("TP.AB.A02")) return Promise.resolve(jsonResponse({ items: DAILY_ITEMS }));
@@ -134,7 +165,7 @@ test("/api/summary: shape + nowcast kabul + meta", async () => {
     assert.equal(res.status, 200);
     const body = (await res.json()) as {
       weekly: { tarih: string; toplam: number }[];
-      daily: { tarih: string; brutRezerv: number; nir: number | null }[];
+      daily: { tarih: string; brutRezerv: number; nir: number | null; goldPriceEffect: number | null }[];
       dolarizasyon: { tarih: string; ypToplam: number; ypYurtici: number }[];
       swap: {
         tarih: string;
@@ -154,6 +185,7 @@ test("/api/summary: shape + nowcast kabul + meta", async () => {
         source: string;
         swapMbSource: string;
         swapMb: number;
+        goldPriceSource: string;
         cached: boolean;
       };
     };
@@ -193,6 +225,12 @@ test("/api/summary: shape + nowcast kabul + meta", async () => {
     assert.ok(Math.abs(byDate.get("2026-06-19")!.brutRezerv - 157.1) < 0.1);
     assert.ok(Math.abs((byDate.get("2026-06-19")!.nir ?? 0) - 48.2) < 0.1);
     assert.ok(body.daily.every((d) => d.nir !== null), "NIR her noktada dolu");
+
+    // altın-fiyat etkisi (Faz 6) — çıpa 12-06 fiyat 4000 → etki 0; 19-06 = 72.08×(4040/4000−1)=0.7208.
+    assert.equal(body.meta.goldPriceSource, "external:yahoo-gcf", "altın kaynağı external");
+    const gpe = new Map(body.daily.map((d) => [d.tarih, d.goldPriceEffect]));
+    assert.ok(Math.abs((gpe.get("2026-06-12") ?? -1) - 0) < 1e-6, "çıpada altın etkisi 0");
+    assert.ok(Math.abs((gpe.get("2026-06-19") ?? 0) - 0.7208) < 1e-4, "19-06 altın etkisi 0.7208");
 
     // meta
     assert.equal(body.meta.anchorDate, "2026-06-12");
@@ -315,6 +353,26 @@ test("/api/summary: swap başarısız -> soft-fail ([]) + meta.swapMbSource=fall
     assert.ok(Math.abs(body.meta.swapMb - 16.4) < 1e-9, "fallback 16.4");
     assert.ok(body.weekly.length > 0 && body.daily.length > 0, "haftalık/günlük dolu");
     assert.ok(body.dolarizasyon.length > 0, "dolarizasyon dolu");
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("/api/summary: altın fiyatı başarısız -> soft-fail (goldPriceEffect null) + 200 + diğerleri dolu", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = mockFetchGoldFails();
+  try {
+    const { env } = makeEnv();
+    const res = await callSummary(env);
+    assert.equal(res.status, 200, "altın hatası tüm summary'yi düşürmemeli");
+    const body = (await res.json()) as {
+      daily: { goldPriceEffect: number | null }[];
+      weekly: unknown[];
+      meta: { goldPriceSource: string };
+    };
+    assert.equal(body.meta.goldPriceSource, "unavailable", "soft-fail -> unavailable");
+    assert.ok(body.daily.every((d) => d.goldPriceEffect === null), "goldPriceEffect tümü null");
+    assert.ok(body.daily.length > 0 && body.weekly.length > 0, "haftalık/günlük hâlâ dolu");
   } finally {
     globalThis.fetch = original;
   }

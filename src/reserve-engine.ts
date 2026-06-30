@@ -167,11 +167,60 @@ export function computeDailyNowcast(
   const baseDv = base.disVarlikUsd;
 
   // 4) Nowcast: brut(t) = toplam(çıpa) + (disVarlik(t) − disVarlik(çıpa)).
+  //    goldPriceEffect başlangıçta null; harici altın fiyatı varsa computeGoldPriceEffect doldurur.
   return rows.map((d) => ({
     tarih: d.tarih,
     brutRezerv: anchor.toplam + (d.disVarlikUsd - baseDv),
     nir: d.nir,
+    goldPriceEffect: null,
   }));
+}
+
+/** ISO tarih anahtarlı altın fiyatı haritasında, `iso`'ya eşit/önceki en yakın fiyat (USD/ons). */
+function priceOnOrBefore(sortedDates: string[], byDate: Map<string, number>, iso: string): number | null {
+  let chosen: number | null = null;
+  for (const d of sortedDates) {
+    if (d <= iso) chosen = byDate.get(d) ?? chosen;
+    else break;
+  }
+  return chosen;
+}
+
+/**
+ * Günlük KÜMÜLATİF altın-fiyat değerleme etkisini hesaplar (Faz 6 — saf, yan etkisiz).
+ * Doğrulanmış yöntem (research-gold-price-effect.md): altın miktarı çıpadan (son resmi Cuma)
+ * itibaren kısa pencerede SABİT kabul edilir → fiyat hareketi haftalık C1 (altın USD değeri)
+ * üzerinden etkiye çevrilir. Oran-bazlı olduğundan altın fiyatı serisinin mutlak seviyesi/baz
+ * farkı sadeleşir (futures ≈ spot kullanılabilir):
+ *
+ *   anchorAltin = weekly[son].altin (milyar USD, C1)
+ *   etki_kum(t) = anchorAltin × ( altınFiyatı(t) / altınFiyatı(çıpa) − 1 )
+ *
+ * - `goldUsdByDate`: ISO tarih → altın fiyatı (USD/ons), harici kaynaktan (EVDS-dışı).
+ * - Çıpa fiyatı ya da o güne ait fiyat yoksa (en yakın önceki de yoksa) o nokta `null` kalır.
+ * - Çıpa altını yoksa/0 ise tüm etkiler `null` (anlamlı oran kurulamaz).
+ * - Saf: yeni dizi döner; girdeki diğer alanlar korunur. Soft-fail dostu (boş harita → hepsi null).
+ */
+export function computeGoldPriceEffect(
+  weekly: WeeklyPoint[],
+  daily: DailyPoint[],
+  goldUsdByDate: Map<string, number>,
+): DailyPoint[] {
+  const anchor = weekly[weekly.length - 1];
+  const sorted = [...goldUsdByDate.keys()].sort();
+  const anchorAltin = anchor?.altin ?? 0;
+  const anchorPrice = anchor ? priceOnOrBefore(sorted, goldUsdByDate, anchor.tarih) : null;
+
+  // Anlamlı oran kurulamıyorsa (çıpa fiyatı/altını yok) tümünü null bırak.
+  if (!anchor || anchorAltin <= 0 || anchorPrice === null || anchorPrice === 0) {
+    return daily.map((d) => ({ ...d, goldPriceEffect: null }));
+  }
+
+  return daily.map((d) => {
+    const p = priceOnOrBefore(sorted, goldUsdByDate, d.tarih);
+    const goldPriceEffect = p === null ? null : anchorAltin * (p / anchorPrice - 1);
+    return { ...d, goldPriceEffect };
+  });
 }
 
 /**
