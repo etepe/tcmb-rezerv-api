@@ -1,5 +1,11 @@
 # UI HANDOFF — Otomatik swap / swap-hariç net rezerv (manuel girdiyi kaldır)
 
+> **KAPSAM GENİŞLEDİ (v2):** Bu doküman yalnız swap manuel-girdi kaldırmayı kapsar. Tam redesign
+> (sağ aside güncel-değer kartları + swap zaman serisi + NIR trend + dolarizasyon trend + günlük
+> rezerv-değişim bar grafiği) için **`HANDOFF-reserve-ui-v2.md`**'ye bak — v2 buradaki swap işini
+> kapsar + genişletir. Hedef repo: `etepe/Research_publishing_v0` (tqrlab.com).
+
+
 > Hedef: tqrlab.com Astro repo'sundaki `tcmb-rezerv-takip` sayfasında **manuel swap girdisini KALDIR**
 > ve `/api/summary`'nin yeni **otomatik `swap`** verisini tüket. Worker tarafı (Faz 5) **CANLI** — bu doküman
 > yalnız UI değişikliğini tarifler. Mobil/sonraki oturum için kendine yeten brief.
