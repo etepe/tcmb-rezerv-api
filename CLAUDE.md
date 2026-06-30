@@ -78,7 +78,7 @@ ypToplam = TP.HPBITABLO4.1/1000 ;  ypYurtici = TP.HPBITABLO4.2/1000
 #   toplam_swap = yabanci_mb + yerli_banka ;  net_dahil = (A02−A11−A14)/USD/1e6 (≡ NIR + A13)
 #   swapHaricNet = net_dahil − toplam_swap   # 41 analist tablosu: ort artık ~0,3 mlr (08.04+ : ≤0,5)
 #   SummaryResponse.swap: SwapPoint[]; meta.swapMbSource ("evds:K18"|"fallback") + meta.swapMb. Soft-fail ([]).
-#   [TODO UI (tqrlab.com): manuel ?swap= girdisini KALDIR → API'nin swap'ını tüket. Caveat korunur:
+#   [UI (tqrlab.com) Faz 5'te TAMAM: manuel ?swap= girdisi KALDIRILDI → UI API'nin swap'ını tüketir. Caveat korunur:
 #    "swap hariç net rezerv" kanonik değil → üçüncü taraf rakamına birebir oturmayabilir.]
 ```
 **Doğrulama referansı (kabul testi):** çıpa 12-06-2026 toplam=152.08; nowcast 17/18/19-06 = 164.2 / 159.4 / 157.1.
@@ -92,7 +92,8 @@ Baz 27-02-2026 = toplam 210.3 / altın 136.8 / döviz 73.4.
 - **Erişim:** sayfa **public** (Cloudflare Access gating yok).
 
 ## Current Status
-- Phase **4 / 4**: Cron ön-ısıtma (sertleştirme) + light-tema paylaşım/PDF varyantı.
+- Phase **5**: otomatik swap ayrıştırması (API) + UI redesign (main+aside, otomatik swap, yeni grafikler) — ✅ TAMAM.
+  Faz 4: Cron ön-ısıtma (sertleştirme) + light-tema paylaşım/PDF varyantı.
   API: `tcmb-rezerv-api.tepe-erdinc.workers.dev` · UI: `tqrlab.com/tcmb-rezerv-takip`. Faz 1-3 ✅ **CANLI**.
 - Tamamlanan (Faz 1): M-001 (haftalık `fetchSeries`) + M-002 (`computeWeekly`/`weeklyMeta`) +
   M-003 (`GET /api/weekly` + KV cache + CORS + tanımlı hata kodları) + M-004 (haftalık stacked area, tqrlab dark).
@@ -121,9 +122,19 @@ Baz 27-02-2026 = toplam 210.3 / altın 136.8 / döviz 73.4.
   (GÜNLÜK, kesin; artık ≤0,33), Yabancı MB = 16,4 bakımlı sabit. swapHaricNet = (A02−A11−A14)/USD − 16,4 −
   SWAPTEKTAR_net → 40 noktada ort 0,3 mlr (08.04 sonrası 31/31 ≤0,5; erken offset analistin eski tablo tabanı).
   Önceki "manuel KALDI" sonucu (research-swap-nir-reproduction.md) düzeltildi → **Faz 5'te API'ye kodlandı**
-  (`/api/summary.swap`; `computeSwapSplit`; K18 oto + `YABANCI_MB_FALLBACK`=16.4; soft-fail). UI manuel-input
-  kaldırma (tqrlab.com) bekliyor. typecheck + 21/21 test + dry-run + canlı smoke ✅.
-- Blocked by: yok. **Çekirdek dashboard + sertleştirme TAMAM (Faz 1-4 CANLI).**
+  (`/api/summary.swap`; `computeSwapSplit`; K18 oto + `YABANCI_MB_FALLBACK`=16.4; soft-fail).
+  typecheck + 21/21 test + dry-run + canlı smoke ✅.
+- Tamamlanan (Faz 5 — UI redesign · tqrlab.com repo `Research_publishing_v0`, HANDOFF-reserve-ui-v2):
+  **manuel swap girdisi KALDIRILDI** (`<input>`/`?swap=`/`localStorage`/paylaşım `&swap=` silindi) → UI
+  API'nin otomatik `swap[]`'ini tüketir. Sayfa **ana grafik sütunu + sağ sticky aside** (güncel-değer kartları:
+  brüt rezerv nowcast / NIR / swap hariç net / dolarizasyon) layout'una taşındı. Yeni bileşenler:
+  `AsideMetricCard`, `ReserveChangeBars` (günlük rezerv-değişim barları, işaret-renk), `NirChart`
+  (`connectNulls=false`), `SwapTrendChart` (netDahil vs netHaric), `utils.ts` (TR format + türev seri).
+  `ReserveSwapCard` API swap'ını + kırılım + fallback rozetini gösterir; `ReserveMetricCards` haftalık manşete
+  indirildi (NIR/nowcast aside'a → çift gösterim yok). Soft-fail (`swap:[]`/null nir/`dolarizasyon:[]` → "veri yok").
+  Caveat + tqrlab marka + `?theme`/`?print` paylaşım/PDF korunur. Doğrulama: `astro build` ✅; `astro check`
+  0 yeni hata; tarayıcı (desktop/mobil/fallback+stale/empty-swap) ✅. PR `Research_publishing_v0#29`.
+- Blocked by: yok. **Çekirdek dashboard + sertleştirme + Faz 5 swap (API + UI) TAMAM (CANLI).**
 
 ## Development Commands
 ```
@@ -149,7 +160,7 @@ pnpm build && wrangler pages deploy dist  # ya da mevcut Pages projesine route
 | M-001 evds-client | `src/evds-client.ts` | ✅ Faz 1-3 (haftalık + günlük + YP mevduat; generic) | sonnet |
 | M-002 reserve-engine | `src/reserve-engine.ts` | ✅ Faz 1-3 (`computeWeekly`/`weeklyMeta`/`computeDailyNowcast`/`computeDolarizasyon`) | opus |
 | M-003 api-worker | `src/index.ts` (+ `src/summary.ts`) | ✅ Faz 1-4 (`/api/weekly` + `/api/summary` [+ `dolarizasyon` soft-fail]; fetch+compute+cache `summary.ts`'te, HTTP+cron paylaşır) | sonnet |
-| M-004 dashboard-ui | tqrlab.com repo: `src/components/reserve/*` (`ReserveDashboard`/`AreaChart`/`MetricCards`/`Dolarizasyon`/`SwapCard`) | ✅ Faz 1-4 (CANLI; + light-tema paylaşım/PDF varyantı: `?theme`/`?print`, `@media print`, yazdır/paylaş araç çubuğu) | sonnet |
+| M-004 dashboard-ui | tqrlab.com repo: `src/components/reserve/*` (`ReserveDashboard`/`AreaChart`/`MetricCards`/`Dolarizasyon`/`SwapCard` + Faz 5: `AsideMetricCard`/`ReserveChangeBars`/`NirChart`/`SwapTrendChart`/`utils`) | ✅ Faz 1-5 (CANLI; light-tema paylaşım/PDF; Faz 5 redesign: main+aside, otomatik swap, yeni grafikler) | sonnet |
 | M-005 scheduled-refresh | `src/scheduled.ts` | ✅ Faz 4 — cron KV ön-ısıtma (`warmCache` → `summary`+`weekly`; `[triggers]` wrangler.toml) | haiku |
 
 ## Conventions
