@@ -91,6 +91,14 @@ export interface DailyPoint {
   brutRezerv: number;
   /** NIR = (A02 − A10) / USD / 1e6 (milyar USD); A10 yoksa null. */
   nir: number | null;
+  /**
+   * Çıpadan (son resmi Cuma) beri KÜMÜLATİF altın-fiyat değerleme etkisi (milyar USD, Faz 6):
+   *   anchorAltin × ( altınFiyatı(t) / altınFiyatı(çıpa) − 1 )
+   * Brüt rezerv değişiminin ne kadarının altın FİYATINDAN (miktar sabit varsayımı) geldiğini
+   * verir; kalan (Δbrut − Δaltın etkisi) döviz akışı + FX paritesi + yükümlülüktür.
+   * Harici (EVDS-dışı) altın fiyatı çekilemezse `null` (soft-fail). Birim ons: troy.
+   */
+  goldPriceEffect: number | null;
 }
 
 /**
@@ -150,6 +158,12 @@ export interface SummaryMeta {
   swapMbSource: "evds:K18" | "fallback";
   /** En güncel swap noktasında kullanılan Yabancı MB değeri (milyar USD, Faz 5). */
   swapMb: number;
+  /**
+   * Altın-fiyat etkisi kaynağı (Faz 6). EVDS'te temiz günlük uluslararası altın fiyatı
+   * olmadığından HARİCİ (EVDS-dışı) bir seri kullanılır; çekilemezse `unavailable`
+   * (daily[].goldPriceEffect tümü null) → çekirdek nowcast etkilenmez.
+   */
+  goldPriceSource: "external:yahoo-gcf" | "unavailable";
   /** Bu yanıt KV cache'ten mi geldi. */
   cached: boolean;
   /**

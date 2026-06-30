@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import {
   computeDailyNowcast,
   computeDolarizasyon,
+  computeGoldPriceEffect,
   computeSwapSplit,
   computeWeekly,
   EngineError,
@@ -223,4 +224,44 @@ test("computeSwapSplit: swap satırı olmayan / A02 olmayan gün atlanır", () =
   ];
   const r = computeSwapSplit(daily, stok, mbStok, 16.4);
   assert.equal(r.points.length, 0, "iki gün de atlanmalı");
+});
+
+// --- Faz 6: computeGoldPriceEffect (altın-fiyat değerleme etkisi) -----------------
+// anchorAltin = weeklyFixture son nokta altin = 72.08 (C1, mlr USD).
+// etki_kum(t) = 72.08 × (fiyat(t)/fiyat(çıpa) − 1). Çıpa 12-06 fiyat 4000.
+test("computeGoldPriceEffect: oran-bazlı kümülatif etki + çıpada 0", () => {
+  const daily = computeDailyNowcast(weeklyFixture, dailyFixture); // 12/17/18/19
+  const gold = new Map<string, number>([
+    ["2026-06-12", 4000],
+    ["2026-06-17", 4200],
+    ["2026-06-18", 4100],
+    ["2026-06-19", 4040],
+  ]);
+  const out = computeGoldPriceEffect(weeklyFixture, daily, gold);
+  const by = new Map(out.map((d) => [d.tarih, d]));
+  assert.ok(Math.abs((by.get("2026-06-12")!.goldPriceEffect ?? -1) - 0) < 1e-9, "çıpada etki 0");
+  assert.ok(Math.abs((by.get("2026-06-17")!.goldPriceEffect ?? 0) - 72.08 * 0.05) < 1e-9, "17-06 = 3.604");
+  assert.ok(Math.abs((by.get("2026-06-19")!.goldPriceEffect ?? 0) - 72.08 * 0.01) < 1e-9, "19-06 = 0.7208");
+  // brutRezerv/nir korunur (saf birleştirme).
+  assert.ok(Math.abs((by.get("2026-06-19")!.brutRezerv ?? 0) - 157.1) < 0.1, "brutRezerv korunur");
+});
+
+test("computeGoldPriceEffect: eksik gün en yakın önceki fiyatı alır", () => {
+  const daily = computeDailyNowcast(weeklyFixture, dailyFixture);
+  const gold = new Map<string, number>([
+    ["2026-06-12", 4000],
+    ["2026-06-16", 4200], // 17/18/19 yok -> en yakın önceki (4200) kullanılır
+  ]);
+  const out = computeGoldPriceEffect(weeklyFixture, daily, gold);
+  const by = new Map(out.map((d) => [d.tarih, d]));
+  const e = 72.08 * (4200 / 4000 - 1);
+  assert.ok(Math.abs((by.get("2026-06-19")!.goldPriceEffect ?? 0) - e) < 1e-9, "17/18/19 = 4200 etkisi");
+});
+
+test("computeGoldPriceEffect: boş harita / çıpa fiyatı yok -> tümü null (soft-fail)", () => {
+  const daily = computeDailyNowcast(weeklyFixture, dailyFixture);
+  assert.ok(computeGoldPriceEffect(weeklyFixture, daily, new Map()).every((d) => d.goldPriceEffect === null), "boş harita");
+  // Çıpa (12-06) ve öncesi fiyat yoksa oran kurulamaz -> null.
+  const noAnchor = new Map<string, number>([["2026-06-17", 4200]]);
+  assert.ok(computeGoldPriceEffect(weeklyFixture, daily, noAnchor).every((d) => d.goldPriceEffect === null), "çıpa fiyatı yok");
 });

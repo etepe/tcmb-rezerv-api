@@ -92,6 +92,8 @@ Baz 27-02-2026 = toplam 210.3 / altın 136.8 / döviz 73.4.
 - **Erişim:** sayfa **public** (Cloudflare Access gating yok).
 
 ## Current Status
+- Phase **6**: günlük altın-fiyat değerleme etkisi ayrıştırması (API) → "Rezerv akışı" barlarını altın
+  fiyat etkisi vs diğer (döviz akışı + parite) olarak böler. API ✅ TAMAM; UI sürüyor.
 - Phase **5**: otomatik swap ayrıştırması (API) + UI redesign (main+aside, otomatik swap, yeni grafikler) — ✅ TAMAM.
   Faz 4: Cron ön-ısıtma (sertleştirme) + light-tema paylaşım/PDF varyantı.
   API: `tcmb-rezerv-api.tepe-erdinc.workers.dev` · UI: `tqrlab.com/tcmb-rezerv-takip`. Faz 1-3 ✅ **CANLI**.
@@ -134,7 +136,13 @@ Baz 27-02-2026 = toplam 210.3 / altın 136.8 / döviz 73.4.
   indirildi (NIR/nowcast aside'a → çift gösterim yok). Soft-fail (`swap:[]`/null nir/`dolarizasyon:[]` → "veri yok").
   Caveat + tqrlab marka + `?theme`/`?print` paylaşım/PDF korunur. Doğrulama: `astro build` ✅; `astro check`
   0 yeni hata; tarayıcı (desktop/mobil/fallback+stale/empty-swap) ✅. PR `Research_publishing_v0#29`.
-- Blocked by: yok. **Çekirdek dashboard + sertleştirme + Faz 5 swap (API + UI) TAMAM (CANLI).**
+- Tamamlanan (Faz 6 — Part A+B · API): araştırma kapısı (`research-gold-price-effect.md`) — altın rezervin
+  ~%62'si; ima edilen miktar kısa pencerede sabit (ort 25,1M ons, CV %5,9; Mart sonu ~130 ton GERÇEK satış);
+  oran-bazlı yöntem doğrulandı. `src/gold-client.ts` (HARİCİ altın fiyatı — Yahoo GC=F; EVDS-only kuralına dar
+  istisna, soft-fail), `computeGoldPriceEffect` (saf, çıpadan beri kümülatif `anchorAltin×(fiyat(t)/fiyat(çıpa)−1)`),
+  `DailyPoint.goldPriceEffect` + `meta.goldPriceSource` ("external:yahoo-gcf"|"unavailable"). Soft-fail: altın
+  çekilemezse `null` + kaynak `unavailable` (çekirdek nowcast düşmez). typecheck + 27/27 test + dry-run ✅.
+- Blocked by: yok. **Çekirdek dashboard + sertleştirme + Faz 5 swap + Faz 6 altın-fiyat etkisi (API) TAMAM.**
 
 ## Development Commands
 ```
@@ -158,8 +166,9 @@ pnpm build && wrangler pages deploy dist  # ya da mevcut Pages projesine route
 | Module | Path | Status | Agent |
 |---|---|---|---|
 | M-001 evds-client | `src/evds-client.ts` | ✅ Faz 1-3 (haftalık + günlük + YP mevduat; generic) | sonnet |
-| M-002 reserve-engine | `src/reserve-engine.ts` | ✅ Faz 1-3 (`computeWeekly`/`weeklyMeta`/`computeDailyNowcast`/`computeDolarizasyon`) | opus |
-| M-003 api-worker | `src/index.ts` (+ `src/summary.ts`) | ✅ Faz 1-4 (`/api/weekly` + `/api/summary` [+ `dolarizasyon` soft-fail]; fetch+compute+cache `summary.ts`'te, HTTP+cron paylaşır) | sonnet |
+| M-001b gold-client | `src/gold-client.ts` | ✅ Faz 6 (HARİCİ altın fiyatı — Yahoo GC=F; EVDS-only'a dar istisna, soft-fail) | opus |
+| M-002 reserve-engine | `src/reserve-engine.ts` | ✅ Faz 1-6 (`computeWeekly`/`weeklyMeta`/`computeDailyNowcast`/`computeDolarizasyon`/`computeSwapSplit`/`computeGoldPriceEffect`) | opus |
+| M-003 api-worker | `src/index.ts` (+ `src/summary.ts`) | ✅ Faz 1-6 (`/api/weekly` + `/api/summary` [+ `dolarizasyon`/`swap`/`goldPriceEffect` soft-fail]; fetch+compute+cache `summary.ts`'te, HTTP+cron paylaşır) | sonnet |
 | M-004 dashboard-ui | tqrlab.com repo: `src/components/reserve/*` (`ReserveDashboard`/`AreaChart`/`MetricCards`/`Dolarizasyon`/`SwapCard` + Faz 5: `AsideMetricCard`/`ReserveChangeBars`/`NirChart`/`SwapTrendChart`/`utils`) | ✅ Faz 1-5 (CANLI; light-tema paylaşım/PDF; Faz 5 redesign: main+aside, otomatik swap, yeni grafikler) | sonnet |
 | M-005 scheduled-refresh | `src/scheduled.ts` | ✅ Faz 4 — cron KV ön-ısıtma (`warmCache` → `summary`+`weekly`; `[triggers]` wrangler.toml) | haiku |
 
@@ -176,6 +185,8 @@ pnpm build && wrangler pages deploy dist  # ya da mevcut Pages projesine route
 - ❌ Tarayıcıdan doğrudan EVDS'e fetch (CORS + anahtar sızıntısı).
 - ❌ Eski `/service/evds` ucunu kullanma (ölü — SPA döner).
 - ❌ Nowcast/NIR formülünü "iyileştirme"/yeniden tasarlama — `tcmb_reserves.py`'de doğrulandı, birebir port et.
-- ❌ Günlük altın/döviz ayrımı **uydurma** (günlük uluslararası altın fiyatı EVDS'de yok; ayrım haftalık kalır).
+- ❌ Günlük altın/döviz **seviye (stok) ayrımını uydurma** (günlük altın/döviz stok ayrımı EVDS'de yok; seviye ayrımı haftalık kalır).
+  ✓ Faz 6: günlük altın **fiyat-DEĞİŞİM etkisi** ayrı (harici altın fiyatı + haftalık C1, oran-bazlı; `computeGoldPriceEffect`) —
+  bu seviye ayrımı değil, değerleme etkisidir; "diğer" segmenti FX paritesini içerir (saf müdahale değil, caveat korunur).
 - ❌ Fazın ötesine geçme. Faz 1 deploy edilip gözden geçirilmeden Faz 2 kodu yazma (BDUF yok).
 - ❌ Jenerik "admin template" görünümü. tqrlab token'ları + DM Sans/JetBrains Mono + sol-kenarlıklı kartlar şart.
