@@ -268,7 +268,8 @@ test("computeGoldPriceEffect: boş harita / çıpa fiyatı yok -> tümü null (s
 });
 
 // --- Faz 7: computeForeignSecurities (yurt dışı yerleşik menkul kıymet) -----------
-// Ham milyon USD → /1000 (milyar). Anahtarlar (bie_mknethar): hisse M1/M7 · DİBS M2/M8 · ÖST M6/M12.
+// Ham milyon USD → /1000 (milyar). Anahtarlar (bie_mknethar): hisse M1/M7 · DİBS M2/M8 ·
+// ÖST M6/M12 · eurobond (Yurt Dışı Piyasa) M15/M22.
 const fsRows: RawRow[] = [
   {
     tarih: "05-06-2026",
@@ -278,6 +279,8 @@ const fsRows: RawRow[] = [
     TP_MKNETHAR_M2: 11000, // DİBS stok
     TP_MKNETHAR_M12: 36.5, // ÖST net
     TP_MKNETHAR_M6: 900, // ÖST stok
+    TP_MKNETHAR_M22: -120.4, // eurobond net
+    TP_MKNETHAR_M15: 7000, // eurobond stok
   },
   // Sırasız girilir; artan sıralı dönmeli.
   {
@@ -288,6 +291,8 @@ const fsRows: RawRow[] = [
     TP_MKNETHAR_M2: 11300,
     TP_MKNETHAR_M12: 10,
     TP_MKNETHAR_M6: 880,
+    TP_MKNETHAR_M22: 30,
+    TP_MKNETHAR_M15: 6950,
   },
 ];
 
@@ -301,9 +306,11 @@ test("computeForeignSecurities: /1000, ISO tarih, sıralama, işaret korunur", (
   assert.ok(Math.abs((fs[1]?.hisseFlow ?? 0) - 0.2931) < 1e-9, "hisse net 0.2931");
   assert.ok(Math.abs((fs[1]?.dibsFlow ?? 0) - -0.3348) < 1e-9, "DİBS net −0.3348");
   assert.ok(Math.abs((fs[1]?.ostFlow ?? 0) - 0.0365) < 1e-9, "ÖST net 0.0365");
+  assert.ok(Math.abs((fs[1]?.eurobondFlow ?? 0) - -0.1204) < 1e-9, "eurobond net −0.1204");
   assert.equal(fs[1]?.hisseStock, 24);
   assert.equal(fs[1]?.dibsStock, 11);
   assert.equal(fs[1]?.ostStock, 0.9);
+  assert.equal(fs[1]?.eurobondStock, 7);
 });
 
 test("computeForeignSecurities: eksik alan -> 0; altısı da null olan satır atlanır", () => {

@@ -56,6 +56,9 @@ const K_FS_DIBS_FLOW = "TP_MKNETHAR_M8"; //     DİBS (Kesin Alım) net değişi
 const K_FS_DIBS_STOCK = "TP_MKNETHAR_M2"; //    DİBS (Kesin Alım) stok (milyon USD)
 const K_FS_OST_FLOW = "TP_MKNETHAR_M12"; //     ÖST (GYD sektör) net değişim (milyon USD)
 const K_FS_OST_STOCK = "TP_MKNETHAR_M6"; //     ÖST (GYD sektör) stok (milyon USD)
+// Eurobond = "Yurt Dışı Piyasa" toplamı (uluslararası ihraç; 1.2 stok / 2.2 net) — Faz 7b.
+const K_FS_EUROBOND_FLOW = "TP_MKNETHAR_M22"; // Yurt Dışı Piyasa net değişim (milyon USD)
+const K_FS_EUROBOND_STOCK = "TP_MKNETHAR_M15"; // Yurt Dışı Piyasa stok (milyon USD)
 
 /** RawRow'dan sayısal değer (yalnız number; string/null/undefined -> null). */
 function num(row: RawRow, key: string): number | null {
@@ -394,8 +397,13 @@ export function computeForeignSecurities(rows: RawRow[]): ForeignSecPoint[] {
     const ds = num(row, K_FS_DIBS_STOCK);
     const of = num(row, K_FS_OST_FLOW);
     const os = num(row, K_FS_OST_STOCK);
-    // Altı ölçü de yoksa gerçek veri yok → satırı atla (uydurma 0 noktası üretme).
-    if (hf === null && hs === null && df === null && ds === null && of === null && os === null) {
+    const ef = num(row, K_FS_EUROBOND_FLOW);
+    const es = num(row, K_FS_EUROBOND_STOCK);
+    // Tüm ölçüler yoksa gerçek veri yok → satırı atla (uydurma 0 noktası üretme).
+    if (
+      hf === null && hs === null && df === null && ds === null &&
+      of === null && os === null && ef === null && es === null
+    ) {
       continue;
     }
     points.push({
@@ -406,6 +414,8 @@ export function computeForeignSecurities(rows: RawRow[]): ForeignSecPoint[] {
       dibsStock: (ds ?? 0) / 1000,
       ostFlow: (of ?? 0) / 1000,
       ostStock: (os ?? 0) / 1000,
+      eurobondFlow: (ef ?? 0) / 1000,
+      eurobondStock: (es ?? 0) / 1000,
     });
   }
   if (points.length === 0) {

@@ -43,12 +43,14 @@ const FOREIGN_SEC_ITEMS = [
     TP_MKNETHAR_M1: "23900", TP_MKNETHAR_M7: "150",
     TP_MKNETHAR_M2: "11100", TP_MKNETHAR_M8: "60",
     TP_MKNETHAR_M6: "890", TP_MKNETHAR_M12: "12",
+    TP_MKNETHAR_M15: "6900", TP_MKNETHAR_M22: "40",
   },
   {
     Tarih: "12-06-2026",
     TP_MKNETHAR_M1: "24000", TP_MKNETHAR_M7: "293.1",
     TP_MKNETHAR_M2: "11000", TP_MKNETHAR_M8: "-334.8",
     TP_MKNETHAR_M6: "900", TP_MKNETHAR_M12: "36.5",
+    TP_MKNETHAR_M15: "7000", TP_MKNETHAR_M22: "-120.4",
   },
 ];
 
@@ -224,6 +226,8 @@ test("/api/summary: shape + nowcast kabul + meta", async () => {
         dibsStock: number;
         ostFlow: number;
         ostStock: number;
+        eurobondFlow: number;
+        eurobondStock: number;
       }[];
       meta: {
         anchorDate: string;
@@ -280,6 +284,8 @@ test("/api/summary: shape + nowcast kabul + meta", async () => {
     assert.equal(fs12!.hisseStock, 24, "hisse stok 24");
     assert.equal(fs12!.dibsStock, 11, "DİBS stok 11");
     assert.equal(fs12!.ostStock, 0.9, "ÖST stok 0.9");
+    assert.ok(Math.abs(fs12!.eurobondFlow - -0.1204) < 1e-9, "eurobond net −0.1204");
+    assert.equal(fs12!.eurobondStock, 7, "eurobond stok 7");
 
     // daily nowcast (kabul)
     const byDate = new Map(body.daily.map((d) => [d.tarih, d]));

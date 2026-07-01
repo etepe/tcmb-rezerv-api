@@ -71,6 +71,8 @@ const FOREIGN_SEC_CODES = [
   "TP.MKNETHAR.M8", // DİBS (Kesin Alım) net değişim
   "TP.MKNETHAR.M6", // ÖST (GYD sektör) stok
   "TP.MKNETHAR.M12", // ÖST (GYD sektör) net değişim
+  "TP.MKNETHAR.M15", // Eurobond (Yurt Dışı Piyasa) stok
+  "TP.MKNETHAR.M22", // Eurobond (Yurt Dışı Piyasa) net değişim
 ];
 
 const DEFAULT_WEEKLY_TTL = 21600; // ~6 saat
