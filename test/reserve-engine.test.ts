@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import {
   computeDailyNowcast,
   computeDolarizasyon,
+  computeForeignSecurities,
   computeGoldPriceEffect,
   computeSwapSplit,
   computeWeekly,
@@ -264,4 +265,63 @@ test("computeGoldPriceEffect: boş harita / çıpa fiyatı yok -> tümü null (s
   // Çıpa (12-06) ve öncesi fiyat yoksa oran kurulamaz -> null.
   const noAnchor = new Map<string, number>([["2026-06-17", 4200]]);
   assert.ok(computeGoldPriceEffect(weeklyFixture, daily, noAnchor).every((d) => d.goldPriceEffect === null), "çıpa fiyatı yok");
+});
+
+// --- Faz 7: computeForeignSecurities (yurt dışı yerleşik menkul kıymet) -----------
+// Ham milyon USD → /1000 (milyar). Anahtarlar (bie_mknethar): hisse M1/M7 · DİBS M2/M8 · ÖST M6/M12.
+const fsRows: RawRow[] = [
+  {
+    tarih: "05-06-2026",
+    TP_MKNETHAR_M7: 293.1, // hisse net
+    TP_MKNETHAR_M1: 24000, // hisse stok
+    TP_MKNETHAR_M8: -334.8, // DİBS net
+    TP_MKNETHAR_M2: 11000, // DİBS stok
+    TP_MKNETHAR_M12: 36.5, // ÖST net
+    TP_MKNETHAR_M6: 900, // ÖST stok
+  },
+  // Sırasız girilir; artan sıralı dönmeli.
+  {
+    tarih: "29-05-2026",
+    TP_MKNETHAR_M7: 100,
+    TP_MKNETHAR_M1: 23800,
+    TP_MKNETHAR_M8: 50,
+    TP_MKNETHAR_M2: 11300,
+    TP_MKNETHAR_M12: 10,
+    TP_MKNETHAR_M6: 880,
+  },
+];
+
+test("computeForeignSecurities: /1000, ISO tarih, sıralama, işaret korunur", () => {
+  const fs = computeForeignSecurities(fsRows);
+  assert.equal(fs.length, 2);
+  // Artan sıra.
+  assert.equal(fs[0]?.tarih, "2026-05-29");
+  assert.equal(fs[1]?.tarih, "2026-06-05");
+  // /1000 dönüşümü + net akım işareti (DİBS satışı negatif).
+  assert.ok(Math.abs((fs[1]?.hisseFlow ?? 0) - 0.2931) < 1e-9, "hisse net 0.2931");
+  assert.ok(Math.abs((fs[1]?.dibsFlow ?? 0) - -0.3348) < 1e-9, "DİBS net −0.3348");
+  assert.ok(Math.abs((fs[1]?.ostFlow ?? 0) - 0.0365) < 1e-9, "ÖST net 0.0365");
+  assert.equal(fs[1]?.hisseStock, 24);
+  assert.equal(fs[1]?.dibsStock, 11);
+  assert.equal(fs[1]?.ostStock, 0.9);
+});
+
+test("computeForeignSecurities: eksik alan -> 0; altısı da null olan satır atlanır", () => {
+  const fs = computeForeignSecurities([
+    // yalnız hisse stok dolu; diğerleri 0'a normalize.
+    { tarih: "12-06-2026", TP_MKNETHAR_M1: 24500 },
+    // altısı da null -> atlanır.
+    { tarih: "19-06-2026", TP_MKNETHAR_M7: null, TP_MKNETHAR_M2: null },
+  ]);
+  assert.equal(fs.length, 1);
+  assert.equal(fs[0]?.hisseStock, 24.5);
+  assert.equal(fs[0]?.dibsFlow, 0);
+  assert.equal(fs[0]?.ostStock, 0);
+});
+
+test("computeForeignSecurities: boş seri -> empty_series", () => {
+  assert.throws(
+    () => computeForeignSecurities([{ tarih: "01-01-2026", TP_MKNETHAR_M7: null }]),
+    (e: unknown) => e instanceof EngineError && e.code === "empty_series",
+  );
 });

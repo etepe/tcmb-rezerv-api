@@ -34,6 +34,23 @@ const MB_ITEMS = [
   { Tarih: "2026-5", TP_DOVVARNC_K18: "-16360" },
   { Tarih: "2026-6", TP_DOVVARNC_K18: "-16310" }, // Haziran -> 16.31
 ];
+// Faz 7 — yurt dışı yerleşik menkul kıymet (haftalık, datagroup bie_mknethar). Ham milyon USD → /1000.
+//   Anahtarlar: hisse M1/M7 · DİBS M2/M8 · ÖST M6/M12 (stok/net).
+//   Kabul: 12-06 hisse net 0.2931 / DİBS net −0.3348 / ÖST net 0.0365 ; stok 24 / 11 / 0.9.
+const FOREIGN_SEC_ITEMS = [
+  {
+    Tarih: "05-06-2026",
+    TP_MKNETHAR_M1: "23900", TP_MKNETHAR_M7: "150",
+    TP_MKNETHAR_M2: "11100", TP_MKNETHAR_M8: "60",
+    TP_MKNETHAR_M6: "890", TP_MKNETHAR_M12: "12",
+  },
+  {
+    Tarih: "12-06-2026",
+    TP_MKNETHAR_M1: "24000", TP_MKNETHAR_M7: "293.1",
+    TP_MKNETHAR_M2: "11000", TP_MKNETHAR_M8: "-334.8",
+    TP_MKNETHAR_M6: "900", TP_MKNETHAR_M12: "36.5",
+  },
+];
 
 // Faz 6 — harici altın fiyatı (Yahoo GC=F chart). Çıpa 12-06 fiyat 4000; 19-06 4040.
 //   anchorAltin = C1(12-06)/1000 = 72.08 → etki_19 = 72.08×(4040/4000−1) = 0.7208.
@@ -66,6 +83,7 @@ function mockFetch(): typeof fetch {
     if (url.includes("yahoo.com")) return Promise.resolve(goldChartResponse(GOLD_ENTRIES));
     if (url.includes("TP.SWAPTEKTAR")) return Promise.resolve(jsonResponse({ items: SWAP_ITEMS }));
     if (url.includes("TP.DOVVARNC")) return Promise.resolve(jsonResponse({ items: MB_ITEMS }));
+    if (url.includes("TP.MKNETHAR")) return Promise.resolve(jsonResponse({ items: FOREIGN_SEC_ITEMS }));
     if (url.includes("TP.AB.A02")) return Promise.resolve(jsonResponse({ items: DAILY_ITEMS }));
     if (url.includes("TP.HPBITABLO4.1")) return Promise.resolve(jsonResponse({ items: DOLAR_ITEMS }));
     return Promise.resolve(jsonResponse({ items: WEEKLY_ITEMS }));
@@ -79,6 +97,7 @@ function mockFetchGoldFails(): typeof fetch {
     if (url.includes("yahoo.com")) return Promise.resolve(new Response("err", { status: 500 }));
     if (url.includes("TP.SWAPTEKTAR")) return Promise.resolve(jsonResponse({ items: SWAP_ITEMS }));
     if (url.includes("TP.DOVVARNC")) return Promise.resolve(jsonResponse({ items: MB_ITEMS }));
+    if (url.includes("TP.MKNETHAR")) return Promise.resolve(jsonResponse({ items: FOREIGN_SEC_ITEMS }));
     if (url.includes("TP.AB.A02")) return Promise.resolve(jsonResponse({ items: DAILY_ITEMS }));
     if (url.includes("TP.HPBITABLO4.1")) return Promise.resolve(jsonResponse({ items: DOLAR_ITEMS }));
     return Promise.resolve(jsonResponse({ items: WEEKLY_ITEMS }));
@@ -92,6 +111,7 @@ function mockFetchDolarFails(): typeof fetch {
     const url = String(typeof input === "object" && "url" in input ? input.url : input);
     if (url.includes("TP.SWAPTEKTAR")) return Promise.resolve(jsonResponse({ items: SWAP_ITEMS }));
     if (url.includes("TP.DOVVARNC")) return Promise.resolve(jsonResponse({ items: MB_ITEMS }));
+    if (url.includes("TP.MKNETHAR")) return Promise.resolve(jsonResponse({ items: FOREIGN_SEC_ITEMS }));
     if (url.includes("TP.AB.A02")) return Promise.resolve(jsonResponse({ items: DAILY_ITEMS }));
     if (url.includes("TP.HPBITABLO4.1")) {
       return Promise.resolve(new Response("<html>error</html>", {
@@ -113,6 +133,27 @@ function mockFetchSwapFails(): typeof fetch {
         headers: { "content-type": "text/html" },
       }));
     }
+    if (url.includes("TP.DOVVARNC")) return Promise.resolve(jsonResponse({ items: MB_ITEMS }));
+    if (url.includes("TP.MKNETHAR")) return Promise.resolve(jsonResponse({ items: FOREIGN_SEC_ITEMS }));
+    if (url.includes("TP.AB.A02")) return Promise.resolve(jsonResponse({ items: DAILY_ITEMS }));
+    if (url.includes("TP.HPBITABLO4.1")) return Promise.resolve(jsonResponse({ items: DOLAR_ITEMS }));
+    return Promise.resolve(jsonResponse({ items: WEEKLY_ITEMS }));
+  }) as typeof fetch;
+}
+
+/** Yurt dışı menkul kıymet (TP.MKNETHAR) çağrısı HTML döndürür -> fetchSeries fırlatır ->
+ *  foreignSecurities soft-fail ([]); haftalık/günlük/dolarizasyon/swap etkilenmez. */
+function mockFetchForeignSecFails(): typeof fetch {
+  return ((input: Request | string | URL) => {
+    const url = String(typeof input === "object" && "url" in input ? input.url : input);
+    if (url.includes("TP.MKNETHAR")) {
+      return Promise.resolve(new Response("<html>error</html>", {
+        status: 200,
+        headers: { "content-type": "text/html" },
+      }));
+    }
+    if (url.includes("yahoo.com")) return Promise.resolve(goldChartResponse(GOLD_ENTRIES));
+    if (url.includes("TP.SWAPTEKTAR")) return Promise.resolve(jsonResponse({ items: SWAP_ITEMS }));
     if (url.includes("TP.DOVVARNC")) return Promise.resolve(jsonResponse({ items: MB_ITEMS }));
     if (url.includes("TP.AB.A02")) return Promise.resolve(jsonResponse({ items: DAILY_ITEMS }));
     if (url.includes("TP.HPBITABLO4.1")) return Promise.resolve(jsonResponse({ items: DOLAR_ITEMS }));
@@ -175,6 +216,15 @@ test("/api/summary: shape + nowcast kabul + meta", async () => {
         toplamSwap: number;
         netHaric: number;
       }[];
+      foreignSecurities: {
+        tarih: string;
+        hisseFlow: number;
+        hisseStock: number;
+        dibsFlow: number;
+        dibsStock: number;
+        ostFlow: number;
+        ostStock: number;
+      }[];
       meta: {
         anchorDate: string;
         anchorBrut: number;
@@ -217,6 +267,19 @@ test("/api/summary: shape + nowcast kabul + meta", async () => {
     assert.ok(Math.abs(swap19!.toplamSwap - 17.61) < 1e-6, "toplam 17.61");
     assert.equal(body.meta.swapMbSource, "evds:K18");
     assert.ok(Math.abs(body.meta.swapMb - 16.31) < 1e-9, "meta.swapMb 16.31");
+
+    // foreignSecurities (Faz 7) — 2 nokta (05/12-06); artan sıra + 12-06 değerleri (/1000, işaret).
+    assert.ok(Array.isArray(body.foreignSecurities), "foreignSecurities dizi");
+    assert.equal(body.foreignSecurities.length, 2, "2 foreignSecurities noktası");
+    assert.equal(body.foreignSecurities[0]!.tarih, "2026-06-05", "artan sıra");
+    const fs12 = body.foreignSecurities.find((f) => f.tarih === "2026-06-12");
+    assert.ok(fs12, "12-06 foreignSecurities noktası var");
+    assert.ok(Math.abs(fs12!.hisseFlow - 0.2931) < 1e-9, "hisse net 0.2931");
+    assert.ok(Math.abs(fs12!.dibsFlow - -0.3348) < 1e-9, "DİBS net −0.3348 (satış negatif)");
+    assert.ok(Math.abs(fs12!.ostFlow - 0.0365) < 1e-9, "ÖST net 0.0365");
+    assert.equal(fs12!.hisseStock, 24, "hisse stok 24");
+    assert.equal(fs12!.dibsStock, 11, "DİBS stok 11");
+    assert.equal(fs12!.ostStock, 0.9, "ÖST stok 0.9");
 
     // daily nowcast (kabul)
     const byDate = new Map(body.daily.map((d) => [d.tarih, d]));
@@ -353,6 +416,31 @@ test("/api/summary: swap başarısız -> soft-fail ([]) + meta.swapMbSource=fall
     assert.ok(Math.abs(body.meta.swapMb - 16.4) < 1e-9, "fallback 16.4");
     assert.ok(body.weekly.length > 0 && body.daily.length > 0, "haftalık/günlük dolu");
     assert.ok(body.dolarizasyon.length > 0, "dolarizasyon dolu");
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("/api/summary: foreignSecurities başarısız -> soft-fail ([]) + 200 + diğerleri dolu", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = mockFetchForeignSecFails();
+  try {
+    const { env } = makeEnv();
+    const res = await callSummary(env);
+    assert.equal(res.status, 200, "foreignSecurities hatası tüm summary'yi düşürmemeli");
+    const body = (await res.json()) as {
+      weekly: unknown[];
+      daily: unknown[];
+      dolarizasyon: unknown[];
+      swap: unknown[];
+      foreignSecurities: unknown[];
+    };
+    assert.ok(
+      Array.isArray(body.foreignSecurities) && body.foreignSecurities.length === 0,
+      "foreignSecurities []",
+    );
+    assert.ok(body.weekly.length > 0 && body.daily.length > 0, "haftalık/günlük dolu");
+    assert.ok(body.dolarizasyon.length > 0 && body.swap.length > 0, "dolarizasyon/swap dolu");
   } finally {
     globalThis.fetch = original;
   }

@@ -53,6 +53,9 @@ CSS değişkeni olarak tanımla, hardcode etme:
 | USD alış kuru | `TP.DK.USD.A.YTL` | İş günü | TL |
 | Toplam YP mevduat | `TP.HPBITABLO4.1` | Haftalık (Cuma) | milyon USD |
 | Yurt içi yerleşik YP mevduat | `TP.HPBITABLO4.2` | Haftalık (Cuma) | milyon USD |
+| YDY menkul kıymet (Faz 7) hisse stok/net | `TP.MKNETHAR.M1` / `.M7` | Haftalık (Cuma) | milyon USD |
+| YDY menkul kıymet DİBS stok/net | `TP.MKNETHAR.M2` / `.M8` | Haftalık (Cuma) | milyon USD |
+| YDY menkul kıymet ÖST stok/net | `TP.MKNETHAR.M6` / `.M12` | Haftalık (Cuma) | milyon USD |
 
 **Hesaplama (hepsi milyar USD çıktı):**
 ```
@@ -142,7 +145,17 @@ Baz 27-02-2026 = toplam 210.3 / altın 136.8 / döviz 73.4.
   istisna, soft-fail), `computeGoldPriceEffect` (saf, çıpadan beri kümülatif `anchorAltin×(fiyat(t)/fiyat(çıpa)−1)`),
   `DailyPoint.goldPriceEffect` + `meta.goldPriceSource` ("external:yahoo-gcf"|"unavailable"). Soft-fail: altın
   çekilemezse `null` + kaynak `unavailable` (çekirdek nowcast düşmez). typecheck + 27/27 test + dry-run ✅.
-- Blocked by: yok. **Çekirdek dashboard + sertleştirme + Faz 5 swap + Faz 6 altın-fiyat etkisi (API) TAMAM.**
+- Tamamlanan (Faz 7 — API + UI): yurt dışı yerleşiklerin menkul kıymet (hisse/DİBS/ÖST) alım-satım
+  istatistikleri. API: `ForeignSecPoint` (hisse/DİBS/ÖST × net akım `*Flow` + stok `*Stock`, mlr USD),
+  `computeForeignSecurities` (dolarizasyon deseni; /1000; kısmi haftaya toleranslı), `buildSummary`'de
+  **soft-fail** blok (`SummaryResponse.foreignSecurities`; EVDS hatasında `[]`, çekirdek düşmez).
+  UI (`Research_publishing_v0`): sayfa içi **sekme çubuğu** (`ReserveTabBar`: Rezervler | Yurtdışı Menkul
+  Kıymet) + `ForeignSecStockChart` (stacked area stok) + `ForeignSecFlowBars` (işaret-yığılmış net akım)
+  + `ForeignSecView`; aside sekmeye göre değişir (hisse/DİBS/ÖST net akım + toplam stok kartları).
+  typecheck + 34/34 test + dry-run ✅; astro build ✅. **Seri kodları TEYİT EDİLDİ** (kullanıcı EVDS
+  ekran görüntüsü): datagroup `bie_mknethar` → hisse `M1`/`M7`, DİBS `M2`/`M8`, ÖST `M6`/`M12`
+  (stok/net; "Yurt İçi Piyasa" alt-kalemleri). Birim milyon USD → /1000.
+- Blocked by: yok. **Çekirdek dashboard + sertleştirme + Faz 5 swap + Faz 6 altın-fiyat + Faz 7 YDY menkul kıymet (API+UI) TAMAM.**
 
 ## Development Commands
 ```
