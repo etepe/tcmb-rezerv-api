@@ -43,17 +43,19 @@ const K_SWAP_ALIM = "TP_SWAPTEKTAR_TOTALSTOKALIMYONLU"; //  toplam swap stok, al
 const K_SWAP_SATIM = "TP_SWAPTEKTAR_TOTALSTOKSATIMYONLU"; // toplam swap stok, satım yönlü (milyon USD)
 const K_MB_K18 = "TP_DOVVARNC_K18"; // SDDS 2.2.1.3 (4ay–1yıl swap bacağı) = yabancı-MB swap (milyon USD)
 // ── Yurt dışı yerleşik menkul kıymet istatistikleri (Faz 7) — yanıt anahtarları (nokta→alt çizgi).
-//    Bu anahtarlar summary.ts'teki FOREIGN_SEC_CODES seri kodlarının nokta→alt çizgi karşılığıdır
-//    (key === code.replaceAll(".", "_")); ikisi BİRLİKTE güncellenmeli.
-//    ⚠️ DOĞRULANACAK: aşağıdaki 6 leaf kod EVDS "Menkul Kıymet İstatistikleri" (datagroup bie_kt100h /
-//       dashboard 1406) UI'sından teyit edilip GÜNCELLE. Yanlış/eksikse fetch boş döner → soft-fail
-//       ile foreignSecurities=[] (çekirdek dashboard etkilenmez). Bkz. summary.ts FOREIGN_SEC_CODES.
-const K_FS_HISSE_FLOW = "TP_MK_YDY_HISSE_NET"; //   yurt dışı yerleşik hisse senedi net alım (milyon USD)
-const K_FS_HISSE_STOCK = "TP_MK_YDY_HISSE_STOK"; // hisse senedi stok, piyasa değeriyle (milyon USD)
-const K_FS_DIBS_FLOW = "TP_MK_YDY_DIBS_NET"; //     DİBS net alım (milyon USD)
-const K_FS_DIBS_STOCK = "TP_MK_YDY_DIBS_STOK"; //   DİBS stok (milyon USD)
-const K_FS_OST_FLOW = "TP_MK_YDY_OST_NET"; //       ÖST net alım (milyon USD)
-const K_FS_OST_STOCK = "TP_MK_YDY_OST_STOK"; //     ÖST stok (milyon USD)
+//    Kaynak: EVDS datagroup `bie_mknethar` (`TP.MKNETHAR.M*`) — "Yurt Dışı Yerleşiklerin Menkul Kıymet
+//    Portföyü". Enstrümanlar = "Yurt İçi Piyasa" alt-kalemleri (kullanıcı teyidiyle EVDS'ten alındı):
+//      Hisse Senedi   stok M1 / net M7    (1.1.1 / 2.1.1)
+//      DİBS (Kesin)   stok M2 / net M8    (1.1.2 / 2.1.2)
+//      ÖST (GYD sekt) stok M6 / net M12   (1.1.3 / 2.1.3)
+//    Bu anahtarlar summary.ts'teki FOREIGN_SEC_CODES kodlarının nokta→alt çizgi karşılığıdır
+//    (key === code.replaceAll(".", "_")); İKİSİ BİRLİKTE değişmeli. Birim: milyon USD → /1000.
+const K_FS_HISSE_FLOW = "TP_MKNETHAR_M7"; //    yurt dışı yerleşik hisse senedi net değişim (milyon USD)
+const K_FS_HISSE_STOCK = "TP_MKNETHAR_M1"; //   hisse senedi stok (milyon USD)
+const K_FS_DIBS_FLOW = "TP_MKNETHAR_M8"; //     DİBS (Kesin Alım) net değişim (milyon USD)
+const K_FS_DIBS_STOCK = "TP_MKNETHAR_M2"; //    DİBS (Kesin Alım) stok (milyon USD)
+const K_FS_OST_FLOW = "TP_MKNETHAR_M12"; //     ÖST (GYD sektör) net değişim (milyon USD)
+const K_FS_OST_STOCK = "TP_MKNETHAR_M6"; //     ÖST (GYD sektör) stok (milyon USD)
 
 /** RawRow'dan sayısal değer (yalnız number; string/null/undefined -> null). */
 function num(row: RawRow, key: string): number | null {

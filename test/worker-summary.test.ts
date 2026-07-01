@@ -34,20 +34,21 @@ const MB_ITEMS = [
   { Tarih: "2026-5", TP_DOVVARNC_K18: "-16360" },
   { Tarih: "2026-6", TP_DOVVARNC_K18: "-16310" }, // Haziran -> 16.31
 ];
-// Faz 7 — yurt dışı yerleşik menkul kıymet (haftalık). Ham milyon USD → /1000 (milyar).
+// Faz 7 — yurt dışı yerleşik menkul kıymet (haftalık, datagroup bie_mknethar). Ham milyon USD → /1000.
+//   Anahtarlar: hisse M1/M7 · DİBS M2/M8 · ÖST M6/M12 (stok/net).
 //   Kabul: 12-06 hisse net 0.2931 / DİBS net −0.3348 / ÖST net 0.0365 ; stok 24 / 11 / 0.9.
 const FOREIGN_SEC_ITEMS = [
   {
     Tarih: "05-06-2026",
-    TP_MK_YDY_HISSE_NET: "150", TP_MK_YDY_HISSE_STOK: "23900",
-    TP_MK_YDY_DIBS_NET: "60", TP_MK_YDY_DIBS_STOK: "11100",
-    TP_MK_YDY_OST_NET: "12", TP_MK_YDY_OST_STOK: "890",
+    TP_MKNETHAR_M1: "23900", TP_MKNETHAR_M7: "150",
+    TP_MKNETHAR_M2: "11100", TP_MKNETHAR_M8: "60",
+    TP_MKNETHAR_M6: "890", TP_MKNETHAR_M12: "12",
   },
   {
     Tarih: "12-06-2026",
-    TP_MK_YDY_HISSE_NET: "293.1", TP_MK_YDY_HISSE_STOK: "24000",
-    TP_MK_YDY_DIBS_NET: "-334.8", TP_MK_YDY_DIBS_STOK: "11000",
-    TP_MK_YDY_OST_NET: "36.5", TP_MK_YDY_OST_STOK: "900",
+    TP_MKNETHAR_M1: "24000", TP_MKNETHAR_M7: "293.1",
+    TP_MKNETHAR_M2: "11000", TP_MKNETHAR_M8: "-334.8",
+    TP_MKNETHAR_M6: "900", TP_MKNETHAR_M12: "36.5",
   },
 ];
 
@@ -82,7 +83,7 @@ function mockFetch(): typeof fetch {
     if (url.includes("yahoo.com")) return Promise.resolve(goldChartResponse(GOLD_ENTRIES));
     if (url.includes("TP.SWAPTEKTAR")) return Promise.resolve(jsonResponse({ items: SWAP_ITEMS }));
     if (url.includes("TP.DOVVARNC")) return Promise.resolve(jsonResponse({ items: MB_ITEMS }));
-    if (url.includes("TP.MK.YDY")) return Promise.resolve(jsonResponse({ items: FOREIGN_SEC_ITEMS }));
+    if (url.includes("TP.MKNETHAR")) return Promise.resolve(jsonResponse({ items: FOREIGN_SEC_ITEMS }));
     if (url.includes("TP.AB.A02")) return Promise.resolve(jsonResponse({ items: DAILY_ITEMS }));
     if (url.includes("TP.HPBITABLO4.1")) return Promise.resolve(jsonResponse({ items: DOLAR_ITEMS }));
     return Promise.resolve(jsonResponse({ items: WEEKLY_ITEMS }));
@@ -96,7 +97,7 @@ function mockFetchGoldFails(): typeof fetch {
     if (url.includes("yahoo.com")) return Promise.resolve(new Response("err", { status: 500 }));
     if (url.includes("TP.SWAPTEKTAR")) return Promise.resolve(jsonResponse({ items: SWAP_ITEMS }));
     if (url.includes("TP.DOVVARNC")) return Promise.resolve(jsonResponse({ items: MB_ITEMS }));
-    if (url.includes("TP.MK.YDY")) return Promise.resolve(jsonResponse({ items: FOREIGN_SEC_ITEMS }));
+    if (url.includes("TP.MKNETHAR")) return Promise.resolve(jsonResponse({ items: FOREIGN_SEC_ITEMS }));
     if (url.includes("TP.AB.A02")) return Promise.resolve(jsonResponse({ items: DAILY_ITEMS }));
     if (url.includes("TP.HPBITABLO4.1")) return Promise.resolve(jsonResponse({ items: DOLAR_ITEMS }));
     return Promise.resolve(jsonResponse({ items: WEEKLY_ITEMS }));
@@ -110,7 +111,7 @@ function mockFetchDolarFails(): typeof fetch {
     const url = String(typeof input === "object" && "url" in input ? input.url : input);
     if (url.includes("TP.SWAPTEKTAR")) return Promise.resolve(jsonResponse({ items: SWAP_ITEMS }));
     if (url.includes("TP.DOVVARNC")) return Promise.resolve(jsonResponse({ items: MB_ITEMS }));
-    if (url.includes("TP.MK.YDY")) return Promise.resolve(jsonResponse({ items: FOREIGN_SEC_ITEMS }));
+    if (url.includes("TP.MKNETHAR")) return Promise.resolve(jsonResponse({ items: FOREIGN_SEC_ITEMS }));
     if (url.includes("TP.AB.A02")) return Promise.resolve(jsonResponse({ items: DAILY_ITEMS }));
     if (url.includes("TP.HPBITABLO4.1")) {
       return Promise.resolve(new Response("<html>error</html>", {
@@ -133,19 +134,19 @@ function mockFetchSwapFails(): typeof fetch {
       }));
     }
     if (url.includes("TP.DOVVARNC")) return Promise.resolve(jsonResponse({ items: MB_ITEMS }));
-    if (url.includes("TP.MK.YDY")) return Promise.resolve(jsonResponse({ items: FOREIGN_SEC_ITEMS }));
+    if (url.includes("TP.MKNETHAR")) return Promise.resolve(jsonResponse({ items: FOREIGN_SEC_ITEMS }));
     if (url.includes("TP.AB.A02")) return Promise.resolve(jsonResponse({ items: DAILY_ITEMS }));
     if (url.includes("TP.HPBITABLO4.1")) return Promise.resolve(jsonResponse({ items: DOLAR_ITEMS }));
     return Promise.resolve(jsonResponse({ items: WEEKLY_ITEMS }));
   }) as typeof fetch;
 }
 
-/** Yurt dışı menkul kıymet (TP.MK.YDY) çağrısı HTML döndürür -> fetchSeries fırlatır ->
+/** Yurt dışı menkul kıymet (TP.MKNETHAR) çağrısı HTML döndürür -> fetchSeries fırlatır ->
  *  foreignSecurities soft-fail ([]); haftalık/günlük/dolarizasyon/swap etkilenmez. */
 function mockFetchForeignSecFails(): typeof fetch {
   return ((input: Request | string | URL) => {
     const url = String(typeof input === "object" && "url" in input ? input.url : input);
-    if (url.includes("TP.MK.YDY")) {
+    if (url.includes("TP.MKNETHAR")) {
       return Promise.resolve(new Response("<html>error</html>", {
         status: 200,
         headers: { "content-type": "text/html" },

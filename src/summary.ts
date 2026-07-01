@@ -57,18 +57,20 @@ const DOLARIZASYON_CODES = ["TP.HPBITABLO4.1", "TP.HPBITABLO4.2"];
 const SWAP_CODES = ["TP.SWAPTEKTAR.TOTALSTOKALIMYONLU", "TP.SWAPTEKTAR.TOTALSTOKSATIMYONLU"];
 const MB_CODES = ["TP.DOVVARNC.K18"];
 // Yurt dışı yerleşik menkul kıymet (Faz 7) — HAFTALIK; hisse/DİBS/ÖST × net akım + stok.
-//   ⚠️ DOĞRULANACAK: bu 6 kod EVDS "Menkul Kıymet İstatistikleri" (datagroup `bie_kt100h` /
-//      dashboard 1406 "Yurt Dışı Yerleşiklerin Menkul Kıymet Portföy Hareketleri", milyon USD)
-//      UI'sından teyit edilip GÜNCELLE. reserve-engine.ts'teki K_FS_* anahtarları bunların
-//      nokta→alt çizgi karşılığıdır (key === code.replaceAll(".", "_")); İKİSİ BİRLİKTE değişmeli.
-//      Yanlış/eksik kodda fetch boş → soft-fail (foreignSecurities=[]); çekirdek dashboard düşmez.
+//   Kaynak: EVDS datagroup `bie_mknethar` (`TP.MKNETHAR.M*`) — "Yurt Dışı Yerleşiklerin Menkul
+//   Kıymet Portföyü"; enstrümanlar "Yurt İçi Piyasa" alt-kalemleri (kullanıcı teyidiyle):
+//     Hisse Senedi = M1 (stok) / M7 (net);  DİBS (Kesin Alım) = M2 / M8;  ÖST (GYD sektör) = M6 / M12.
+//   reserve-engine.ts'teki K_FS_* anahtarları bunların nokta→alt çizgi karşılığıdır
+//   (key === code.replaceAll(".", "_")); İKİSİ BİRLİKTE değişmeli. Birim: milyon USD → /1000.
+//   Soft-fail: fetch boş/hatalıysa foreignSecurities=[]; çekirdek dashboard düşmez.
+//   (Bağlam serileri — Genel Toplam M13/M20, Yurt Dışı Piyasa/eurobond M15/M22 — ileride eklenebilir.)
 const FOREIGN_SEC_CODES = [
-  "TP.MK.YDY.HISSE.NET", // hisse net alım
-  "TP.MK.YDY.HISSE.STOK", // hisse stok (piyasa değeri)
-  "TP.MK.YDY.DIBS.NET", // DİBS net alım
-  "TP.MK.YDY.DIBS.STOK", // DİBS stok
-  "TP.MK.YDY.OST.NET", // ÖST net alım
-  "TP.MK.YDY.OST.STOK", // ÖST stok
+  "TP.MKNETHAR.M1", // hisse senedi stok
+  "TP.MKNETHAR.M7", // hisse senedi net değişim
+  "TP.MKNETHAR.M2", // DİBS (Kesin Alım) stok
+  "TP.MKNETHAR.M8", // DİBS (Kesin Alım) net değişim
+  "TP.MKNETHAR.M6", // ÖST (GYD sektör) stok
+  "TP.MKNETHAR.M12", // ÖST (GYD sektör) net değişim
 ];
 
 const DEFAULT_WEEKLY_TTL = 21600; // ~6 saat

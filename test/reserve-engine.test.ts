@@ -268,26 +268,26 @@ test("computeGoldPriceEffect: boş harita / çıpa fiyatı yok -> tümü null (s
 });
 
 // --- Faz 7: computeForeignSecurities (yurt dışı yerleşik menkul kıymet) -----------
-// Ham milyon USD → /1000 (milyar). Anahtarlar reserve-engine K_FS_* ile eşleşmeli.
+// Ham milyon USD → /1000 (milyar). Anahtarlar (bie_mknethar): hisse M1/M7 · DİBS M2/M8 · ÖST M6/M12.
 const fsRows: RawRow[] = [
   {
     tarih: "05-06-2026",
-    TP_MK_YDY_HISSE_NET: 293.1,
-    TP_MK_YDY_HISSE_STOK: 24000,
-    TP_MK_YDY_DIBS_NET: -334.8,
-    TP_MK_YDY_DIBS_STOK: 11000,
-    TP_MK_YDY_OST_NET: 36.5,
-    TP_MK_YDY_OST_STOK: 900,
+    TP_MKNETHAR_M7: 293.1, // hisse net
+    TP_MKNETHAR_M1: 24000, // hisse stok
+    TP_MKNETHAR_M8: -334.8, // DİBS net
+    TP_MKNETHAR_M2: 11000, // DİBS stok
+    TP_MKNETHAR_M12: 36.5, // ÖST net
+    TP_MKNETHAR_M6: 900, // ÖST stok
   },
   // Sırasız girilir; artan sıralı dönmeli.
   {
     tarih: "29-05-2026",
-    TP_MK_YDY_HISSE_NET: 100,
-    TP_MK_YDY_HISSE_STOK: 23800,
-    TP_MK_YDY_DIBS_NET: 50,
-    TP_MK_YDY_DIBS_STOK: 11300,
-    TP_MK_YDY_OST_NET: 10,
-    TP_MK_YDY_OST_STOK: 880,
+    TP_MKNETHAR_M7: 100,
+    TP_MKNETHAR_M1: 23800,
+    TP_MKNETHAR_M8: 50,
+    TP_MKNETHAR_M2: 11300,
+    TP_MKNETHAR_M12: 10,
+    TP_MKNETHAR_M6: 880,
   },
 ];
 
@@ -309,9 +309,9 @@ test("computeForeignSecurities: /1000, ISO tarih, sıralama, işaret korunur", (
 test("computeForeignSecurities: eksik alan -> 0; altısı da null olan satır atlanır", () => {
   const fs = computeForeignSecurities([
     // yalnız hisse stok dolu; diğerleri 0'a normalize.
-    { tarih: "12-06-2026", TP_MK_YDY_HISSE_STOK: 24500 },
+    { tarih: "12-06-2026", TP_MKNETHAR_M1: 24500 },
     // altısı da null -> atlanır.
-    { tarih: "19-06-2026", TP_MK_YDY_HISSE_NET: null, TP_MK_YDY_DIBS_STOK: null },
+    { tarih: "19-06-2026", TP_MKNETHAR_M7: null, TP_MKNETHAR_M2: null },
   ]);
   assert.equal(fs.length, 1);
   assert.equal(fs[0]?.hisseStock, 24.5);
@@ -321,7 +321,7 @@ test("computeForeignSecurities: eksik alan -> 0; altısı da null olan satır at
 
 test("computeForeignSecurities: boş seri -> empty_series", () => {
   assert.throws(
-    () => computeForeignSecurities([{ tarih: "01-01-2026", TP_MK_YDY_HISSE_NET: null }]),
+    () => computeForeignSecurities([{ tarih: "01-01-2026", TP_MKNETHAR_M7: null }]),
     (e: unknown) => e instanceof EngineError && e.code === "empty_series",
   );
 });

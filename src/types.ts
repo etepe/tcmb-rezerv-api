@@ -175,8 +175,9 @@ export interface SummaryMeta {
 
 /**
  * Haftalık yurt dışı yerleşiklerin menkul kıymet istatistikleri (Faz 7). Hepsi milyar USD
- * (ham milyon / 1000). Kaynak: EVDS "Menkul Kıymet İstatistikleri" (datagroup `bie_kt100h`;
- * dashboard 1406 "Yurt Dışı Yerleşiklerin Menkul Kıymet Portföy Hareketleri", milyon USD, Cuma).
+ * (ham milyon / 1000). Kaynak: EVDS "Yurt Dışı Yerleşiklerin Menkul Kıymet Portföyü"
+ * (datagroup `bie_mknethar` · `TP.MKNETHAR.M*`, milyon USD, Cuma). Enstrümanlar "Yurt İçi Piyasa"
+ * alt-kalemleri: hisse M1/M7 · DİBS M2/M8 · ÖST M6/M12 (stok/net).
  *
  * Her enstrüman için iki ölçü:
  *   - `*Flow`  = haftalık NET alım-satım (akım); + giriş / − çıkış.
