@@ -7,6 +7,7 @@
 
 import type {
   DolarPoint,
+  ForeignSecPoint,
   SummaryMeta,
   SummaryResponse,
   SwapPoint,
@@ -18,6 +19,7 @@ import { fetchGoldUsdByDate } from "./gold-client.ts";
 import {
   computeDailyNowcast,
   computeDolarizasyon,
+  computeForeignSecurities,
   computeGoldPriceEffect,
   computeSwapSplit,
   computeWeekly,
@@ -54,6 +56,20 @@ const DOLARIZASYON_CODES = ["TP.HPBITABLO4.1", "TP.HPBITABLO4.2"];
 // Swap (Faz 5): SWAPTEKTAR günlük (yerli banka), DOVVARNC.K18 aylık (yabancı MB).
 const SWAP_CODES = ["TP.SWAPTEKTAR.TOTALSTOKALIMYONLU", "TP.SWAPTEKTAR.TOTALSTOKSATIMYONLU"];
 const MB_CODES = ["TP.DOVVARNC.K18"];
+// Yurt dışı yerleşik menkul kıymet (Faz 7) — HAFTALIK; hisse/DİBS/ÖST × net akım + stok.
+//   ⚠️ DOĞRULANACAK: bu 6 kod EVDS "Menkul Kıymet İstatistikleri" (datagroup `bie_kt100h` /
+//      dashboard 1406 "Yurt Dışı Yerleşiklerin Menkul Kıymet Portföy Hareketleri", milyon USD)
+//      UI'sından teyit edilip GÜNCELLE. reserve-engine.ts'teki K_FS_* anahtarları bunların
+//      nokta→alt çizgi karşılığıdır (key === code.replaceAll(".", "_")); İKİSİ BİRLİKTE değişmeli.
+//      Yanlış/eksik kodda fetch boş → soft-fail (foreignSecurities=[]); çekirdek dashboard düşmez.
+const FOREIGN_SEC_CODES = [
+  "TP.MK.YDY.HISSE.NET", // hisse net alım
+  "TP.MK.YDY.HISSE.STOK", // hisse stok (piyasa değeri)
+  "TP.MK.YDY.DIBS.NET", // DİBS net alım
+  "TP.MK.YDY.DIBS.STOK", // DİBS stok
+  "TP.MK.YDY.OST.NET", // ÖST net alım
+  "TP.MK.YDY.OST.STOK", // ÖST stok
+];
 
 const DEFAULT_WEEKLY_TTL = 21600; // ~6 saat
 const DEFAULT_DAILY_TTL = 3600; //   ~1 saat (summary; günlük veri daha sık tazelenir)
@@ -153,8 +169,9 @@ export async function buildWeekly(
  * Saf üretim: haftalık + günlük nowcast + NIR + dolarizasyon → SummaryResponse
  * (cached=false). KV'ye DOKUNMAZ. handleSummary'nin eski cache-miss gövdesiyle birebir.
  *
- * Dolarizasyon (Faz 3) soft-fail: EVDS'ten çekilemez/boşsa `[]` döner; çekirdek
- * haftalık/günlük dashboard ikincil panele bağımlı olmaz.
+ * Dolarizasyon (Faz 3) / swap (Faz 5) / altın-fiyat (Faz 6) / yurtdışı menkul kıymet (Faz 7)
+ * soft-fail: EVDS'ten çekilemez/boşsa `[]`/null döner; çekirdek haftalık/günlük dashboard
+ * ikincil panellere bağımlı olmaz.
  *
  * Hatalar: EvdsError / EngineError (index.ts catch'i tanımlı hata koduna çevirir).
  */
@@ -227,6 +244,17 @@ export async function buildSummary(
     swapMb = mbFallback(env);
   }
 
+  // 5) Yurt dışı yerleşik menkul kıymet (Faz 7) — best-effort/soft-fail. HAFTALIK ([start,end]);
+  //    hisse/DİBS/ÖST net akım + stok. EVDS'ten çekilemez/boşsa `[]` → yeni sekme "veri yok",
+  //    çekirdek rezerv dashboard'u etkilenmez (dolarizasyon/swap ile aynı desen).
+  let foreignSecurities: ForeignSecPoint[] = [];
+  try {
+    const fsRows = await fetchSeries(FOREIGN_SEC_CODES, start, end, env.TCMB_EVDS_KEY);
+    foreignSecurities = computeForeignSecurities(fsRows);
+  } catch {
+    foreignSecurities = [];
+  }
+
   const meta: SummaryMeta = {
     anchorDate: anchor.tarih,
     anchorBrut: anchor.toplam,
@@ -241,7 +269,7 @@ export async function buildSummary(
     goldPriceSource,
     cached: false,
   };
-  return { weekly, daily, dolarizasyon, swap, meta };
+  return { weekly, daily, dolarizasyon, swap, foreignSecurities, meta };
 }
 
 /** KV'den weekly oku; varsa cached=true işaretle, yoksa null. */

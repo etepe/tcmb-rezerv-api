@@ -174,14 +174,43 @@ export interface SummaryMeta {
 }
 
 /**
+ * Haftalık yurt dışı yerleşiklerin menkul kıymet istatistikleri (Faz 7). Hepsi milyar USD
+ * (ham milyon / 1000). Kaynak: EVDS "Menkul Kıymet İstatistikleri" (datagroup `bie_kt100h`;
+ * dashboard 1406 "Yurt Dışı Yerleşiklerin Menkul Kıymet Portföy Hareketleri", milyon USD, Cuma).
+ *
+ * Her enstrüman için iki ölçü:
+ *   - `*Flow`  = haftalık NET alım-satım (akım); + giriş / − çıkış.
+ *   - `*Stock` = piyasa değeriyle toplam stok (pozisyon seviyesi).
+ * Akım kısmi/eksik yayımda null yerine 0 normalize edilir.
+ */
+export interface ForeignSecPoint {
+  /** ISO tarih `yyyy-mm-dd`. */
+  tarih: string;
+  /** Hisse senedi net alım (milyar USD; + giriş / − çıkış). */
+  hisseFlow: number;
+  /** Hisse senedi stok, piyasa değeriyle (milyar USD). */
+  hisseStock: number;
+  /** DİBS (Devlet İç Borçlanma Senetleri) net alım (milyar USD). */
+  dibsFlow: number;
+  /** DİBS stok (milyar USD). */
+  dibsStock: number;
+  /** ÖST (özel sektör borçlanma senetleri) net alım (milyar USD). */
+  ostFlow: number;
+  /** ÖST stok (milyar USD). */
+  ostStock: number;
+}
+
+/**
  * GET /api/summary yanıt gövdesi (C-001).
  * Faz 3: + `dolarizasyon` (haftalık YP mevduat). Faz 5: + `swap` (günlük swap ayrıştırması).
- * Her ikisi de EVDS'ten çekilemezse soft-fail ile boş dizi döner (çekirdek haftalık/günlük dashboard düşmez).
+ * Faz 7: + `foreignSecurities` (haftalık yurt dışı yerleşik menkul kıymet akım+stok).
+ * Hepsi EVDS'ten çekilemezse soft-fail ile boş dizi döner (çekirdek haftalık/günlük dashboard düşmez).
  */
 export interface SummaryResponse {
   weekly: WeeklyPoint[];
   daily: DailyPoint[];
   dolarizasyon: DolarPoint[];
   swap: SwapPoint[];
+  foreignSecurities: ForeignSecPoint[];
   meta: SummaryMeta;
 }

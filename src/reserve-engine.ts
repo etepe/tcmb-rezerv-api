@@ -8,6 +8,7 @@ import type {
   ApiErrorCode,
   DailyPoint,
   DolarPoint,
+  ForeignSecPoint,
   RawRow,
   SwapPoint,
   WeeklyComputedMeta,
@@ -41,6 +42,18 @@ const K_A14 = "TP_AB_A14"; //  TP.AB.A14 — bankacılık sektörü YP mevduatı
 const K_SWAP_ALIM = "TP_SWAPTEKTAR_TOTALSTOKALIMYONLU"; //  toplam swap stok, alım yönlü (milyon USD)
 const K_SWAP_SATIM = "TP_SWAPTEKTAR_TOTALSTOKSATIMYONLU"; // toplam swap stok, satım yönlü (milyon USD)
 const K_MB_K18 = "TP_DOVVARNC_K18"; // SDDS 2.2.1.3 (4ay–1yıl swap bacağı) = yabancı-MB swap (milyon USD)
+// ── Yurt dışı yerleşik menkul kıymet istatistikleri (Faz 7) — yanıt anahtarları (nokta→alt çizgi).
+//    Bu anahtarlar summary.ts'teki FOREIGN_SEC_CODES seri kodlarının nokta→alt çizgi karşılığıdır
+//    (key === code.replaceAll(".", "_")); ikisi BİRLİKTE güncellenmeli.
+//    ⚠️ DOĞRULANACAK: aşağıdaki 6 leaf kod EVDS "Menkul Kıymet İstatistikleri" (datagroup bie_kt100h /
+//       dashboard 1406) UI'sından teyit edilip GÜNCELLE. Yanlış/eksikse fetch boş döner → soft-fail
+//       ile foreignSecurities=[] (çekirdek dashboard etkilenmez). Bkz. summary.ts FOREIGN_SEC_CODES.
+const K_FS_HISSE_FLOW = "TP_MK_YDY_HISSE_NET"; //   yurt dışı yerleşik hisse senedi net alım (milyon USD)
+const K_FS_HISSE_STOCK = "TP_MK_YDY_HISSE_STOK"; // hisse senedi stok, piyasa değeriyle (milyon USD)
+const K_FS_DIBS_FLOW = "TP_MK_YDY_DIBS_NET"; //     DİBS net alım (milyon USD)
+const K_FS_DIBS_STOCK = "TP_MK_YDY_DIBS_STOK"; //   DİBS stok (milyon USD)
+const K_FS_OST_FLOW = "TP_MK_YDY_OST_NET"; //       ÖST net alım (milyon USD)
+const K_FS_OST_STOCK = "TP_MK_YDY_OST_STOK"; //     ÖST stok (milyon USD)
 
 /** RawRow'dan sayısal değer (yalnız number; string/null/undefined -> null). */
 function num(row: RawRow, key: string): number | null {
@@ -358,4 +371,44 @@ export function computeSwapSplit(
     mbSource: hasMb ? "evds:K18" : "fallback",
     mb: last ? last.yabanciMb : fallbackMb,
   };
+}
+
+/**
+ * Ham yurt dışı yerleşik menkul kıymet satırlarından `ForeignSecPoint[]` türetir (Faz 7).
+ * `computeDolarizasyon` desenini izler: `num` → /1000 (milyon USD → milyar USD) → `isoDate` → sırala.
+ *
+ * Her enstrüman için akım (net alım) + stok. Kısmi haftalara toleranslı: bir alan yoksa 0 kabul edilir
+ * (akım günlük/erken yayımda eksik olabilir; stok Cuma yayımlanır). Altı alan da null olan satır ATLANIR.
+ *
+ * HAFTALIK ham veri, ayrıştırma/uydurma YOK. Hata: `empty_series` (hiç geçerli satır yok) —
+ * buildSummary'de try/catch ile soft-fail'e (foreignSecurities=[]) dönüşür.
+ */
+export function computeForeignSecurities(rows: RawRow[]): ForeignSecPoint[] {
+  const points: ForeignSecPoint[] = [];
+  for (const row of rows) {
+    const hf = num(row, K_FS_HISSE_FLOW);
+    const hs = num(row, K_FS_HISSE_STOCK);
+    const df = num(row, K_FS_DIBS_FLOW);
+    const ds = num(row, K_FS_DIBS_STOCK);
+    const of = num(row, K_FS_OST_FLOW);
+    const os = num(row, K_FS_OST_STOCK);
+    // Altı ölçü de yoksa gerçek veri yok → satırı atla (uydurma 0 noktası üretme).
+    if (hf === null && hs === null && df === null && ds === null && of === null && os === null) {
+      continue;
+    }
+    points.push({
+      tarih: isoDate(row.tarih),
+      hisseFlow: (hf ?? 0) / 1000,
+      hisseStock: (hs ?? 0) / 1000,
+      dibsFlow: (df ?? 0) / 1000,
+      dibsStock: (ds ?? 0) / 1000,
+      ostFlow: (of ?? 0) / 1000,
+      ostStock: (os ?? 0) / 1000,
+    });
+  }
+  if (points.length === 0) {
+    throw new EngineError("empty_series", "Yurtdışı menkul kıymet serisi boş (geçerli satır yok).");
+  }
+  points.sort((a, b) => a.tarih.localeCompare(b.tarih));
+  return points;
 }
