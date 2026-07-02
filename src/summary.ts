@@ -23,6 +23,7 @@ import {
   computeGoldPriceEffect,
   computeSwapSplit,
   computeWeekly,
+  computeWeeklyFlow,
   EngineError,
   weeklyMeta,
 } from "./reserve-engine.ts";
@@ -205,18 +206,25 @@ export async function buildSummary(
   const latestDaily = daily[daily.length - 1];
 
   // 2b) Altın-fiyat etkisi (Faz 6) — best-effort/soft-fail. HARİCİ (EVDS-dışı) günlük altın
-  //     fiyatı [çıpa, end] aralığında çekilir; computeGoldPriceEffect daily[].goldPriceEffect'i
-  //     doldurur. Çekilemezse goldPriceEffect null kalır + goldPriceSource "unavailable"
-  //     (çekirdek nowcast/NIR düşmez).
+  //     fiyatı [start, end] aralığında çekilir (Faz 8 haftalık ayrıştırma tarihsel Cuma fiyatlarını
+  //     ister; tek geniş çekim hem günlük computeGoldPriceEffect'e — çıpa fiyatı priceOnOrBefore
+  //     ile hâlâ çözülür — hem haftalıya hizmet eder, ek ağ çağrısı yok). Çekilemezse goldPriceEffect
+  //     null kalır + goldPriceSource "unavailable" (çekirdek nowcast/NIR düşmez).
   let goldPriceSource: SummaryMeta["goldPriceSource"] = "unavailable";
+  let goldUsdByDate = new Map<string, number>();
   try {
-    const goldUsdByDate = await fetchGoldUsdByDate(anchor.tarih, ddMmYyyyToIso(end));
+    goldUsdByDate = await fetchGoldUsdByDate(ddMmYyyyToIso(start), ddMmYyyyToIso(end));
     daily = computeGoldPriceEffect(weekly, daily, goldUsdByDate);
     // Hiç noktaya etki yazılamadıysa (oran kurulamadı) kaynağı "unavailable" tut.
     if (daily.some((d) => d.goldPriceEffect !== null)) goldPriceSource = "external:yahoo-gcf";
   } catch {
     goldPriceSource = "unavailable";
+    goldUsdByDate = new Map();
   }
+
+  // 2c) Haftalık rezerv değişimi ayrıştırması (Faz 8) — saf, no-throw. Altın soft-fail'de map boş
+  //     → gold/other parçaları null, deltalar dolu (grafik tek-mod bara düşer).
+  const weeklyFlow = computeWeeklyFlow(weekly, daily, goldUsdByDate);
 
   // 3) Haftalık dolarizasyon (YP mevduat) — best-effort/soft-fail.
   let dolarizasyon: DolarPoint[] = [];
@@ -273,7 +281,7 @@ export async function buildSummary(
     goldPriceSource,
     cached: false,
   };
-  return { weekly, daily, dolarizasyon, swap, foreignSecurities, meta };
+  return { weekly, daily, dolarizasyon, swap, foreignSecurities, weeklyFlow, meta };
 }
 
 /** KV'den weekly oku; varsa cached=true işaretle, yoksa null. */

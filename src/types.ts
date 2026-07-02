@@ -207,9 +207,32 @@ export interface ForeignSecPoint {
 }
 
 /**
+ * Haftalık brüt rezerv değişimi ayrıştırması (Faz 8). Resmi Cuma-Cuma Δbrüt, altın
+ * FİYAT değerleme etkisi vs kalan "diğer" (döviz akışı + parite + altın miktar hareketi)
+ * olarak bölünür. Yöntem: `computeGoldPriceEffect`'in oran-bazlı yaklaşımının haftalık
+ * analoğu (yeni formül DEĞİL). Son eleman devam eden haftanın nowcast kümülatif değişimidir.
+ * Hepsi milyar USD.
+ */
+export interface WeeklyFlowPoint {
+  /** Hafta-sonu Cuma (ISO `yyyy-mm-dd`); nowcast'te son günlük nokta tarihi. */
+  tarih: string;
+  /** Önceki Cuma (ISO); nowcast barında çıpa Cuma. */
+  prevTarih: string;
+  /** Δbrüt rezerv (toplam_n − toplam_{n-1}); nowcast'te brutRezerv − çıpa.toplam. */
+  delta: number;
+  /** Altın fiyat değerleme etkisi (altin_{n-1} × (fiyat_n/fiyat_{n-1} − 1)); altın yoksa null. */
+  goldPriceEffect: number | null;
+  /** delta − goldPriceEffect = döviz akışı + parite (+ altın miktarı); altın yoksa null. */
+  otherPart: number | null;
+  /** Devam eden hafta (son sütun, nowcast ile hesaplanan kümülatif) → true. */
+  nowcast?: boolean;
+}
+
+/**
  * GET /api/summary yanıt gövdesi (C-001).
  * Faz 3: + `dolarizasyon` (haftalık YP mevduat). Faz 5: + `swap` (günlük swap ayrıştırması).
  * Faz 7: + `foreignSecurities` (haftalık yurt dışı yerleşik menkul kıymet akım+stok).
+ * Faz 8: + `weeklyFlow` (haftalık rezerv değişimi: altın fiyat etkisi vs diğer + nowcast son sütun).
  * Hepsi EVDS'ten çekilemezse soft-fail ile boş dizi döner (çekirdek haftalık/günlük dashboard düşmez).
  */
 export interface SummaryResponse {
@@ -218,5 +241,6 @@ export interface SummaryResponse {
   dolarizasyon: DolarPoint[];
   swap: SwapPoint[];
   foreignSecurities: ForeignSecPoint[];
+  weeklyFlow: WeeklyFlowPoint[];
   meta: SummaryMeta;
 }

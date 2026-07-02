@@ -229,6 +229,14 @@ test("/api/summary: shape + nowcast kabul + meta", async () => {
         eurobondFlow: number;
         eurobondStock: number;
       }[];
+      weeklyFlow: {
+        tarih: string;
+        prevTarih: string;
+        delta: number;
+        goldPriceEffect: number | null;
+        otherPart: number | null;
+        nowcast?: boolean;
+      }[];
       meta: {
         anchorDate: string;
         anchorBrut: number;
@@ -300,6 +308,24 @@ test("/api/summary: shape + nowcast kabul + meta", async () => {
     const gpe = new Map(body.daily.map((d) => [d.tarih, d.goldPriceEffect]));
     assert.ok(Math.abs((gpe.get("2026-06-12") ?? -1) - 0) < 1e-6, "çıpada altın etkisi 0");
     assert.ok(Math.abs((gpe.get("2026-06-19") ?? 0) - 0.7208) < 1e-4, "19-06 altın etkisi 0.7208");
+
+    // haftalık rezerv değişimi (Faz 8) — 1 tarihsel (27-02→12-06) + 1 nowcast (12-06→19-06).
+    assert.ok(Array.isArray(body.weeklyFlow), "weeklyFlow dizi");
+    assert.equal(body.weeklyFlow.length, 2, "1 tarihsel + 1 nowcast");
+    const wfHist = body.weeklyFlow[0]!;
+    assert.equal(wfHist.tarih, "2026-06-12");
+    assert.equal(wfHist.prevTarih, "2026-02-27");
+    assert.ok(Math.abs(wfHist.delta - (152.08 - 210.3)) < 0.01, "tarihsel delta ≈ −58.22");
+    // Mock altın serisi yalnız Haziran fiyatları içerir → 27-02 fiyatı yok → tarihsel gold null.
+    assert.equal(wfHist.goldPriceEffect, null, "tarihsel gold null (Şubat fiyatı yok)");
+    assert.equal(wfHist.otherPart, null, "tarihsel other null");
+    const wfNow = body.weeklyFlow[body.weeklyFlow.length - 1]!;
+    assert.equal(wfNow.nowcast, true, "son sütun nowcast");
+    assert.equal(wfNow.tarih, "2026-06-19");
+    assert.equal(wfNow.prevTarih, "2026-06-12");
+    assert.ok(Math.abs(wfNow.delta - (157.1 - 152.08)) < 0.02, "nowcast delta ≈ 5.02");
+    assert.ok(Math.abs((wfNow.goldPriceEffect ?? 0) - 0.7208) < 1e-4, "nowcast gold 0.7208");
+    assert.ok(Math.abs((wfNow.otherPart ?? 0) - (wfNow.delta - 0.7208)) < 1e-4, "nowcast other = delta − gold");
 
     // meta
     assert.equal(body.meta.anchorDate, "2026-06-12");
@@ -462,11 +488,19 @@ test("/api/summary: altın fiyatı başarısız -> soft-fail (goldPriceEffect nu
     const body = (await res.json()) as {
       daily: { goldPriceEffect: number | null }[];
       weekly: unknown[];
+      weeklyFlow: { delta: number; goldPriceEffect: number | null; otherPart: number | null }[];
       meta: { goldPriceSource: string };
     };
     assert.equal(body.meta.goldPriceSource, "unavailable", "soft-fail -> unavailable");
     assert.ok(body.daily.every((d) => d.goldPriceEffect === null), "goldPriceEffect tümü null");
     assert.ok(body.daily.length > 0 && body.weekly.length > 0, "haftalık/günlük hâlâ dolu");
+    // Faz 8: altın soft-fail'de weeklyFlow yine üretilir; gold/other null ama delta dolu.
+    assert.ok(body.weeklyFlow.length > 0, "weeklyFlow yine dolu");
+    assert.ok(
+      body.weeklyFlow.every((w) => w.goldPriceEffect === null && w.otherPart === null),
+      "gold/other tümü null",
+    );
+    assert.ok(body.weeklyFlow.every((w) => typeof w.delta === "number"), "delta yine dolu");
   } finally {
     globalThis.fetch = original;
   }

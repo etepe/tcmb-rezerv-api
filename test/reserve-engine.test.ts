@@ -10,6 +10,7 @@ import {
   computeGoldPriceEffect,
   computeSwapSplit,
   computeWeekly,
+  computeWeeklyFlow,
   EngineError,
   weeklyMeta,
 } from "../src/reserve-engine.ts";
@@ -265,6 +266,55 @@ test("computeGoldPriceEffect: boş harita / çıpa fiyatı yok -> tümü null (s
   // Çıpa (12-06) ve öncesi fiyat yoksa oran kurulamaz -> null.
   const noAnchor = new Map<string, number>([["2026-06-17", 4200]]);
   assert.ok(computeGoldPriceEffect(weeklyFixture, daily, noAnchor).every((d) => d.goldPriceEffect === null), "çıpa fiyatı yok");
+});
+
+// --- Faz 8: computeWeeklyFlow (haftalık rezerv değişimi: altın fiyat etkisi vs diğer) ---
+// weeklyFixture: 27-02 (altin 136.8) → 12-06 (çıpa, altin 72.08). 1 tarihsel bar + 1 nowcast.
+test("computeWeeklyFlow: tarihsel Cuma-Cuma ayrıştırma + nowcast son sütun", () => {
+  const gold = new Map<string, number>([
+    ["2026-02-27", 3000],
+    ["2026-06-12", 4000],
+    ["2026-06-19", 4040],
+  ]);
+  const daily = computeGoldPriceEffect(
+    weeklyFixture,
+    computeDailyNowcast(weeklyFixture, dailyFixture),
+    gold,
+  );
+  const flow = computeWeeklyFlow(weeklyFixture, daily, gold);
+  assert.equal(flow.length, 2, "1 tarihsel + 1 nowcast");
+
+  // Tarihsel: 27-02 → 12-06. delta = 152.08 − 210.3 = −58.22.
+  //   gold = 136.8 × (4000/3000 − 1) = 45.6 ; other = −58.22 − 45.6 = −103.82.
+  const h = flow[0]!;
+  assert.equal(h.tarih, "2026-06-12");
+  assert.equal(h.prevTarih, "2026-02-27");
+  assert.ok(!h.nowcast, "tarihsel bar nowcast değil");
+  assert.ok(Math.abs(h.delta - (152.08 - 210.3)) < 1e-9, "delta = −58.22");
+  assert.ok(Math.abs((h.goldPriceEffect ?? 0) - 45.6) < 1e-9, "gold = 45.6");
+  assert.ok(Math.abs((h.otherPart ?? 0) - (152.08 - 210.3 - 45.6)) < 1e-9, "other = delta − gold");
+
+  // Nowcast: çıpa 12-06 → son günlük 19-06. delta = brut_19 − 152.08 ≈ 5.02.
+  //   gold = daily[19-06].goldPriceEffect = 72.08 × (4040/4000 − 1) = 0.7208.
+  const n = flow[1]!;
+  assert.equal(n.tarih, "2026-06-19");
+  assert.equal(n.prevTarih, "2026-06-12");
+  assert.equal(n.nowcast, true, "son sütun nowcast");
+  assert.ok(Math.abs(n.delta - (157.1 - 152.08)) < 0.02, "delta ≈ 5.02");
+  assert.ok(Math.abs((n.goldPriceEffect ?? 0) - 72.08 * 0.01) < 1e-9, "gold = 0.7208");
+  assert.ok(Math.abs((n.otherPart ?? 0) - (n.delta - 72.08 * 0.01)) < 1e-9, "other = delta − gold");
+});
+
+test("computeWeeklyFlow: altın yok (boş harita) -> gold/other null, delta dolu", () => {
+  const daily = computeDailyNowcast(weeklyFixture, dailyFixture); // goldPriceEffect null
+  const flow = computeWeeklyFlow(weeklyFixture, daily, new Map());
+  assert.equal(flow.length, 2);
+  for (const p of flow) {
+    assert.equal(p.goldPriceEffect, null, "gold null");
+    assert.equal(p.otherPart, null, "other null");
+    assert.equal(typeof p.delta, "number", "delta yine dolu");
+  }
+  assert.ok(Math.abs(flow[0]!.delta - (152.08 - 210.3)) < 1e-9, "tarihsel delta korunur");
 });
 
 // --- Faz 7: computeForeignSecurities (yurt dışı yerleşik menkul kıymet) -----------
