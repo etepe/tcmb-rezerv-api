@@ -12,6 +12,7 @@ import type {
   RawRow,
   SwapPoint,
   WeeklyComputedMeta,
+  WeeklyFlowPoint,
   WeeklyPoint,
 } from "./types.ts";
 
@@ -239,6 +240,67 @@ export function computeGoldPriceEffect(
     const goldPriceEffect = p === null ? null : anchorAltin * (p / anchorPrice - 1);
     return { ...d, goldPriceEffect };
   });
+}
+
+/**
+ * Haftalık brüt rezerv değişimini ayrıştırır (Faz 8 — saf, yan etkisiz).
+ * `computeGoldPriceEffect`'in oran-bazlı yönteminin HAFTALIK analoğudur (yeni formül değil):
+ * her ardışık Cuma çifti için Δbrüt, altın FİYAT değerleme etkisi ve kalan "diğer" olarak bölünür.
+ *
+ *   delta_n           = toplam_n − toplam_{n-1}
+ *   goldPriceEffect_n = altin_{n-1} × ( fiyat(Cuma_n)/fiyat(Cuma_{n-1}) − 1 )   # önceki hafta altını çıpa
+ *   otherPart_n       = delta_n − goldPriceEffect_n   # döviz akışı + parite (+ altın miktar hareketi)
+ *
+ * Son eleman = DEVAM EDEN hafta (nowcast): çıpadan (son resmi Cuma) bugüne kümülatif değişim;
+ * gold parçası doğrudan `daily[son].goldPriceEffect` (Faz 6 çıktısı, çıpadan kümülatif) yeniden kullanılır.
+ *
+ * - `goldUsdByDate`: ISO tarih → altın fiyatı (USD/ons); [start,end] aralığı beklenir (tarihsel haftalar için).
+ * - Bir haftanın fiyatlarından biri (ya da önceki hafta altını ≤0) yoksa o barın gold/other parçaları null,
+ *   `delta` yine dolu → grafik tek-mod bara düşer. Boş harita → tüm gold parçaları null (soft-fail dostu).
+ * - Saf: yeni dizi döner, girdi değişmez.
+ */
+export function computeWeeklyFlow(
+  weekly: WeeklyPoint[],
+  daily: DailyPoint[],
+  goldUsdByDate: Map<string, number>,
+): WeeklyFlowPoint[] {
+  const sorted = [...goldUsdByDate.keys()].sort();
+  const out: WeeklyFlowPoint[] = [];
+
+  // Tarihsel: ardışık resmi Cuma çiftleri.
+  for (let i = 1; i < weekly.length; i++) {
+    const prev = weekly[i - 1];
+    const cur = weekly[i];
+    if (!prev || !cur) continue;
+    const delta = cur.toplam - prev.toplam;
+    const pPrev = priceOnOrBefore(sorted, goldUsdByDate, prev.tarih);
+    const pCur = priceOnOrBefore(sorted, goldUsdByDate, cur.tarih);
+    let goldPriceEffect: number | null = null;
+    if (prev.altin > 0 && pPrev !== null && pPrev !== 0 && pCur !== null) {
+      goldPriceEffect = prev.altin * (pCur / pPrev - 1);
+    }
+    const otherPart = goldPriceEffect === null ? null : delta - goldPriceEffect;
+    out.push({ tarih: cur.tarih, prevTarih: prev.tarih, delta, goldPriceEffect, otherPart });
+  }
+
+  // Devam eden hafta (nowcast son sütun): çıpa → en güncel günlük nokta.
+  const anchor = weekly[weekly.length - 1];
+  const latestDaily = daily[daily.length - 1];
+  if (anchor && latestDaily && latestDaily.tarih !== anchor.tarih) {
+    const delta = latestDaily.brutRezerv - anchor.toplam;
+    const goldPriceEffect = latestDaily.goldPriceEffect ?? null;
+    const otherPart = goldPriceEffect === null ? null : delta - goldPriceEffect;
+    out.push({
+      tarih: latestDaily.tarih,
+      prevTarih: anchor.tarih,
+      delta,
+      goldPriceEffect,
+      otherPart,
+      nowcast: true,
+    });
+  }
+
+  return out;
 }
 
 /**
