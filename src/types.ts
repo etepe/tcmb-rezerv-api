@@ -229,10 +229,36 @@ export interface WeeklyFlowPoint {
 }
 
 /**
+ * Aylık brüt rezerv değişimi ayrıştırması (Faz 9). `WeeklyFlowPoint`'in AYLIK analoğu —
+ * `weekly` serisi `yyyy-mm`'e gruplanır, her ay o aydaki SON Cuma ile temsil edilir; ardışık
+ * ay-sonu çiftleri için Δbrüt, altın FİYAT değerleme etkisi vs kalan "diğer" (döviz akışı +
+ * parite + altın miktar hareketi) olarak bölünür. Yöntem `computeWeeklyFlow` ile birebir
+ * simetrik (yeni formül DEĞİL). Son eleman devam eden ayın nowcast kümülatif değişimidir.
+ * Hepsi milyar USD.
+ */
+export interface MonthlyFlowPoint {
+  /** Ay anahtarı `yyyy-mm` (temsil eden ay-sonu Cuma'nın ayı); nowcast'te son günlük noktanın ayı. */
+  ay: string;
+  /** Ay temsilci Cuma (ISO `yyyy-mm-dd`, aydaki son Cuma); nowcast'te son günlük nokta tarihi. */
+  tarih: string;
+  /** Önceki ay temsilci Cuma (ISO); nowcast barında çıpa (son resmi Cuma). */
+  prevTarih: string;
+  /** Δbrüt rezerv (toplam_n − toplam_{n-1}); nowcast'te brutRezerv − çıpa.toplam. */
+  delta: number;
+  /** Altın fiyat değerleme etkisi (altin_{n-1} × (fiyat_n/fiyat_{n-1} − 1)); altın yoksa null. */
+  goldPriceEffect: number | null;
+  /** delta − goldPriceEffect = döviz akışı + parite (+ altın miktarı); altın yoksa null. */
+  otherPart: number | null;
+  /** Devam eden ay (son sütun, nowcast ile hesaplanan kümülatif) → true. */
+  nowcast?: boolean;
+}
+
+/**
  * GET /api/summary yanıt gövdesi (C-001).
  * Faz 3: + `dolarizasyon` (haftalık YP mevduat). Faz 5: + `swap` (günlük swap ayrıştırması).
  * Faz 7: + `foreignSecurities` (haftalık yurt dışı yerleşik menkul kıymet akım+stok).
  * Faz 8: + `weeklyFlow` (haftalık rezerv değişimi: altın fiyat etkisi vs diğer + nowcast son sütun).
+ * Faz 9: + `monthlyFlow` (aylık rezerv değişimi; weeklyFlow'un aylık analoğu + nowcast son sütun).
  * Hepsi EVDS'ten çekilemezse soft-fail ile boş dizi döner (çekirdek haftalık/günlük dashboard düşmez).
  */
 export interface SummaryResponse {
@@ -242,5 +268,6 @@ export interface SummaryResponse {
   swap: SwapPoint[];
   foreignSecurities: ForeignSecPoint[];
   weeklyFlow: WeeklyFlowPoint[];
+  monthlyFlow: MonthlyFlowPoint[];
   meta: SummaryMeta;
 }

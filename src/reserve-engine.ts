@@ -9,6 +9,7 @@ import type {
   DailyPoint,
   DolarPoint,
   ForeignSecPoint,
+  MonthlyFlowPoint,
   RawRow,
   SwapPoint,
   WeeklyComputedMeta,
@@ -297,6 +298,82 @@ export function computeWeeklyFlow(
       goldPriceEffect,
       otherPart,
       nowcast: true,
+    });
+  }
+
+  return out;
+}
+
+/**
+ * Aylık brüt rezerv değişimini ayrıştırır (Faz 9 — saf, yan etkisiz).
+ * `computeWeeklyFlow`'un AYLIK analoğudur (yeni formül DEĞİL): haftalık seri `yyyy-mm`'e
+ * gruplanır, her ay o aydaki SON Cuma ile temsil edilir, ardışık ay-sonu çiftleri için Δbrüt,
+ * altın FİYAT değerleme etkisi ve kalan "diğer" olarak bölünür.
+ *
+ *   delta_n           = toplam_n − toplam_{n-1}                                  # ay-sonu Cuma değerleri
+ *   goldPriceEffect_n = altin_{n-1} × ( fiyat(aySonu_n)/fiyat(aySonu_{n-1}) − 1 )  # önceki ay-sonu altını çıpa
+ *   otherPart_n       = delta_n − goldPriceEffect_n
+ *
+ * Son eleman = DEVAM EDEN ay (nowcast): son tamamlanmış ay-sonundan en güncel günlük noktaya
+ * kümülatif değişim. Haftalık nowcast barının aksine gold parçası `daily[son].goldPriceEffect`
+ * yeniden KULLANILMAZ — çünkü onun çıpası son resmi Cuma'dır, oysa aylık nowcast'ın tabanı
+ * ÖNCEKİ ay-sonudur; tarihsel barlarla birebir aynı oran-bazlı yöntemle (taban = önceki ay-sonu)
+ * yeniden hesaplanır ki `otherPart = delta − gold` tutarlı kalsın.
+ *
+ * - `goldUsdByDate`: ISO tarih → altın fiyatı (USD/ons); [start,end] beklenir (tarihsel ay-sonları için).
+ * - Bir ayın fiyatlarından biri (ya da önceki ay-sonu altını ≤0) yoksa o barın gold/other parçaları null,
+ *   `delta` yine dolu → grafik tek-mod bara düşer. Boş harita → tüm gold parçaları null (soft-fail dostu).
+ * - < 2 ay veri varsa boş dizi (ay-be-ay değişim kurulamaz). Saf: yeni dizi döner, girdi değişmez.
+ */
+export function computeMonthlyFlow(
+  weekly: WeeklyPoint[],
+  daily: DailyPoint[],
+  goldUsdByDate: Map<string, number>,
+): MonthlyFlowPoint[] {
+  const sorted = [...goldUsdByDate.keys()].sort();
+
+  // 1) Her ayı o aydaki SON Cuma ile temsil et (yyyy-mm → en büyük ISO tarihli WeeklyPoint).
+  const repByMonth = new Map<string, WeeklyPoint>();
+  for (const w of weekly) {
+    const ay = monthKey(w.tarih);
+    const cur = repByMonth.get(ay);
+    if (!cur || w.tarih > cur.tarih) repByMonth.set(ay, w);
+  }
+  const reps = [...repByMonth.entries()]
+    .map(([ay, point]) => ({ ay, point }))
+    .sort((a, b) => a.ay.localeCompare(b.ay));
+
+  // 2) Devam eden (son) ay: son resmi Cuma partial → ay-içi bugüne kadarki kümülatif için
+  //    en güncel günlük nowcast noktasıyla değerlenir. anchor = son resmi Cuma.
+  const anchor = weekly[weekly.length - 1];
+  const latestDaily = daily[daily.length - 1];
+  const useNowcast = !!anchor && !!latestDaily && latestDaily.tarih !== anchor.tarih;
+
+  const out: MonthlyFlowPoint[] = [];
+  for (let i = 1; i < reps.length; i++) {
+    const prev = reps[i - 1]!;
+    const cur = reps[i]!;
+    const isLast = i === reps.length - 1;
+    const nowcast = isLast && useNowcast;
+    // Son ay + nowcast varsa cur değeri/tarihi güncel günlük noktadan gelir (ay-içi kümülatif).
+    const curTarih = nowcast ? latestDaily!.tarih : cur.point.tarih;
+    const curToplam = nowcast ? latestDaily!.brutRezerv : cur.point.toplam;
+    const delta = curToplam - prev.point.toplam;
+    const pPrev = priceOnOrBefore(sorted, goldUsdByDate, prev.point.tarih);
+    const pCur = priceOnOrBefore(sorted, goldUsdByDate, curTarih);
+    let goldPriceEffect: number | null = null;
+    if (prev.point.altin > 0 && pPrev !== null && pPrev !== 0 && pCur !== null) {
+      goldPriceEffect = prev.point.altin * (pCur / pPrev - 1);
+    }
+    const otherPart = goldPriceEffect === null ? null : delta - goldPriceEffect;
+    out.push({
+      ay: cur.ay,
+      tarih: curTarih,
+      prevTarih: prev.point.tarih,
+      delta,
+      goldPriceEffect,
+      otherPart,
+      ...(nowcast ? { nowcast: true } : {}),
     });
   }
 

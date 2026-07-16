@@ -237,6 +237,15 @@ test("/api/summary: shape + nowcast kabul + meta", async () => {
         otherPart: number | null;
         nowcast?: boolean;
       }[];
+      monthlyFlow: {
+        ay: string;
+        tarih: string;
+        prevTarih: string;
+        delta: number;
+        goldPriceEffect: number | null;
+        otherPart: number | null;
+        nowcast?: boolean;
+      }[];
       meta: {
         anchorDate: string;
         anchorBrut: number;
@@ -326,6 +335,19 @@ test("/api/summary: shape + nowcast kabul + meta", async () => {
     assert.ok(Math.abs(wfNow.delta - (157.1 - 152.08)) < 0.02, "nowcast delta ≈ 5.02");
     assert.ok(Math.abs((wfNow.goldPriceEffect ?? 0) - 0.7208) < 1e-4, "nowcast gold 0.7208");
     assert.ok(Math.abs((wfNow.otherPart ?? 0) - (wfNow.delta - 0.7208)) < 1e-4, "nowcast other = delta − gold");
+
+    // aylık rezerv değişimi (Faz 9) — mock weekly Şubat + Haziran → 1 nowcast bar (Şubat-sonu → 19-06).
+    assert.ok(Array.isArray(body.monthlyFlow), "monthlyFlow dizi");
+    assert.equal(body.monthlyFlow.length, 1, "yalnız devam eden ay (Haziran) nowcast barı");
+    const mfNow = body.monthlyFlow[0]!;
+    assert.equal(mfNow.ay, "2026-06");
+    assert.equal(mfNow.tarih, "2026-06-19");
+    assert.equal(mfNow.prevTarih, "2026-02-27", "önceki ay-sonu (Şubat 27)");
+    assert.equal(mfNow.nowcast, true, "devam eden ay nowcast");
+    assert.ok(Math.abs(mfNow.delta - (157.1 - 210.3)) < 0.02, "aylık nowcast delta ≈ −53.2");
+    // Mock altın yalnız Haziran fiyatları → Şubat fiyatı yok → gold null.
+    assert.equal(mfNow.goldPriceEffect, null, "gold null (Şubat fiyatı yok)");
+    assert.equal(mfNow.otherPart, null, "other null");
 
     // meta
     assert.equal(body.meta.anchorDate, "2026-06-12");
@@ -489,6 +511,7 @@ test("/api/summary: altın fiyatı başarısız -> soft-fail (goldPriceEffect nu
       daily: { goldPriceEffect: number | null }[];
       weekly: unknown[];
       weeklyFlow: { delta: number; goldPriceEffect: number | null; otherPart: number | null }[];
+      monthlyFlow: { delta: number; goldPriceEffect: number | null; otherPart: number | null }[];
       meta: { goldPriceSource: string };
     };
     assert.equal(body.meta.goldPriceSource, "unavailable", "soft-fail -> unavailable");
@@ -501,6 +524,13 @@ test("/api/summary: altın fiyatı başarısız -> soft-fail (goldPriceEffect nu
       "gold/other tümü null",
     );
     assert.ok(body.weeklyFlow.every((w) => typeof w.delta === "number"), "delta yine dolu");
+    // Faz 9: monthlyFlow de altın soft-fail'de üretilir; gold/other null ama delta dolu.
+    assert.ok(body.monthlyFlow.length > 0, "monthlyFlow yine dolu");
+    assert.ok(
+      body.monthlyFlow.every((m) => m.goldPriceEffect === null && m.otherPart === null),
+      "monthly gold/other tümü null",
+    );
+    assert.ok(body.monthlyFlow.every((m) => typeof m.delta === "number"), "monthly delta yine dolu");
   } finally {
     globalThis.fetch = original;
   }

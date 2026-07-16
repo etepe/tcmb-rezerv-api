@@ -8,6 +8,7 @@ import {
   computeDolarizasyon,
   computeForeignSecurities,
   computeGoldPriceEffect,
+  computeMonthlyFlow,
   computeSwapSplit,
   computeWeekly,
   computeWeeklyFlow,
@@ -315,6 +316,74 @@ test("computeWeeklyFlow: altın yok (boş harita) -> gold/other null, delta dolu
     assert.equal(typeof p.delta, "number", "delta yine dolu");
   }
   assert.ok(Math.abs(flow[0]!.delta - (152.08 - 210.3)) < 1e-9, "tarihsel delta korunur");
+});
+
+// --- Faz 9: computeMonthlyFlow (aylık rezerv değişimi: weeklyFlow'un aylık analoğu) ---
+// Fixture: Nisan iki Cuma (10 & 24 → temsilci son Cuma 24), Mayıs 29, Haziran 12 (anchor).
+// Günlük nowcast Haziran içinde (12 anchor → 19). Beklenen: 1 tarihsel (Mayıs) + 1 nowcast (Haziran).
+const monthlyWeeklyFixture: WeeklyPoint[] = [
+  { tarih: "2026-04-10", toplam: 98, doviz: 59, altin: 39 },
+  { tarih: "2026-04-24", toplam: 100, doviz: 60, altin: 40 }, // Nisan temsilci (son Cuma)
+  { tarih: "2026-05-29", toplam: 110, doviz: 66, altin: 44 }, // Mayıs temsilci
+  { tarih: "2026-06-12", toplam: 120, doviz: 70, altin: 50 }, // Haziran temsilci = anchor
+];
+// USD=40. disVarlikUsd = A02/40/1e6. brut(t)=anchor.toplam + (dv(t)−dv(anchor)).
+// dv(12)=300, dv(19)=305 → brut_19 = 120 + 5 = 125.
+const monthlyDailyRows: RawRow[] = [
+  { tarih: "12-06-2026", TP_AB_A02: 12_000_000_000, TP_AB_A10: 4_000_000_000, TP_DK_USD_A_YTL: 40 },
+  { tarih: "19-06-2026", TP_AB_A02: 12_200_000_000, TP_AB_A10: 4_000_000_000, TP_DK_USD_A_YTL: 40 },
+];
+
+test("computeMonthlyFlow: ay-sonu Cuma gruplama + tarihsel bar + nowcast son ay", () => {
+  const daily = computeDailyNowcast(monthlyWeeklyFixture, monthlyDailyRows);
+  const gold = new Map<string, number>([
+    ["2026-04-24", 3000],
+    ["2026-05-29", 4000],
+    ["2026-06-12", 4000],
+    ["2026-06-19", 4400],
+  ]);
+  const flow = computeMonthlyFlow(monthlyWeeklyFixture, daily, gold);
+  assert.equal(flow.length, 2, "1 tarihsel (Mayıs) + 1 nowcast (Haziran)");
+
+  // Tarihsel Mayıs: Nisan temsilci (24, son Cuma) → Mayıs (29). delta = 110 − 100 = 10.
+  //   gold = 40 × (4000/3000 − 1) = 13.333 ; other = 10 − gold.
+  const h = flow[0]!;
+  assert.equal(h.ay, "2026-05");
+  assert.equal(h.tarih, "2026-05-29");
+  assert.equal(h.prevTarih, "2026-04-24", "Nisan temsilcisi son Cuma (24), erken Cuma (10) değil");
+  assert.ok(!h.nowcast, "tarihsel bar nowcast değil");
+  assert.ok(Math.abs(h.delta - 10) < 1e-9, "delta = 10");
+  assert.ok(Math.abs((h.goldPriceEffect ?? 0) - 40 * (4000 / 3000 - 1)) < 1e-9, "gold = 13.333");
+  assert.ok(Math.abs((h.otherPart ?? 0) - (10 - 40 * (4000 / 3000 - 1))) < 1e-9, "other = delta − gold");
+
+  // Nowcast Haziran: Mayıs-sonu (29, toplam 110) → güncel günlük (19-06, brut 125). delta = 15.
+  //   gold = altin_Mayıs(44) × (fiyat_19/fiyat_29 − 1) = 44 × (4400/4000 − 1) = 4.4 ; other = 15 − 4.4.
+  const n = flow[1]!;
+  assert.equal(n.ay, "2026-06");
+  assert.equal(n.tarih, "2026-06-19");
+  assert.equal(n.prevTarih, "2026-05-29", "nowcast tabanı önceki ay-sonu (Mayıs 29)");
+  assert.equal(n.nowcast, true, "son sütun nowcast");
+  assert.ok(Math.abs(n.delta - 15) < 1e-9, "delta = 15 (125 − 110)");
+  assert.ok(Math.abs((n.goldPriceEffect ?? 0) - 44 * (4400 / 4000 - 1)) < 1e-9, "gold = 4.4");
+  assert.ok(Math.abs((n.otherPart ?? 0) - (15 - 4.4)) < 1e-9, "other = delta − gold = 10.6");
+});
+
+test("computeMonthlyFlow: altın yok (boş harita) -> gold/other null, delta dolu", () => {
+  const daily = computeDailyNowcast(monthlyWeeklyFixture, monthlyDailyRows);
+  const flow = computeMonthlyFlow(monthlyWeeklyFixture, daily, new Map());
+  assert.equal(flow.length, 2);
+  for (const p of flow) {
+    assert.equal(p.goldPriceEffect, null, "gold null");
+    assert.equal(p.otherPart, null, "other null");
+    assert.equal(typeof p.delta, "number", "delta yine dolu");
+  }
+  assert.ok(Math.abs(flow[0]!.delta - 10) < 1e-9, "tarihsel Mayıs delta korunur");
+});
+
+test("computeMonthlyFlow: < 2 ay veri -> boş dizi", () => {
+  const oneMonth: WeeklyPoint[] = [{ tarih: "2026-06-12", toplam: 120, doviz: 70, altin: 50 }];
+  const daily = computeDailyNowcast(oneMonth, monthlyDailyRows);
+  assert.equal(computeMonthlyFlow(oneMonth, daily, new Map()).length, 0);
 });
 
 // --- Faz 7: computeForeignSecurities (yurt dışı yerleşik menkul kıymet) -----------

@@ -24,6 +24,7 @@ import {
   computeSwapSplit,
   computeWeekly,
   computeWeeklyFlow,
+  computeMonthlyFlow,
   EngineError,
   weeklyMeta,
 } from "./reserve-engine.ts";
@@ -226,6 +227,10 @@ export async function buildSummary(
   //     → gold/other parçaları null, deltalar dolu (grafik tek-mod bara düşer).
   const weeklyFlow = computeWeeklyFlow(weekly, daily, goldUsdByDate);
 
+  // 2d) Aylık rezerv değişimi ayrıştırması (Faz 9) — saf, no-throw. weeklyFlow ile aynı girdiler
+  //     (haftalık seri ay-sonu Cuma'ya gruplanır + günlük nowcast son ay). Ek EVDS/altın çekimi yok.
+  const monthlyFlow = computeMonthlyFlow(weekly, daily, goldUsdByDate);
+
   // 3) Haftalık dolarizasyon (YP mevduat) — best-effort/soft-fail.
   let dolarizasyon: DolarPoint[] = [];
   try {
@@ -281,7 +286,7 @@ export async function buildSummary(
     goldPriceSource,
     cached: false,
   };
-  return { weekly, daily, dolarizasyon, swap, foreignSecurities, weeklyFlow, meta };
+  return { weekly, daily, dolarizasyon, swap, foreignSecurities, weeklyFlow, monthlyFlow, meta };
 }
 
 /** KV'den weekly oku; varsa cached=true işaretle, yoksa null. */
