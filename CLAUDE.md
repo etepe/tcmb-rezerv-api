@@ -166,7 +166,17 @@ Baz 27-02-2026 = toplam 210.3 / altın 136.8 / döviz 73.4.
   Parite AYRIŞTIRILMAZ (kullanıcı kararı) — "diğer"de kalır, caveat korunur (Faz 6 ile tutarlı).
   typecheck ✅ · 33/33 test ✅ (yeni `computeWeeklyFlow` + summary `weeklyFlow` + gold-unavailable) · dry-run ✅.
   Kabul korunur: çıpa 12-06=152.08; nowcast 19-06=157.1. UI (`Research_publishing_v0`) `WeeklyChangeBars` tüketir.
-- Blocked by: yok. **Çekirdek dashboard + sertleştirme + Faz 5 swap + Faz 6 altın-fiyat + Faz 7 YDY menkul kıymet + Faz 8 haftalık rezerv değişimi (API) TAMAM.**
+- Tamamlanan (Faz 9 — API + UI): aylık rezerv değişimi ayrıştırması. `MonthlyFlowPoint` (ay/tarih/prevTarih/
+  delta/goldPriceEffect/otherPart/nowcast) + `SummaryResponse.monthlyFlow`; `computeMonthlyFlow` (saf, no-throw)
+  — `computeWeeklyFlow`'un AYLIK analoğu: `weekly` `yyyy-mm`'e gruplanır, her ay o aydaki SON Cuma ile temsil
+  edilir; ardışık ay-sonu çiftleri için `delta=Δtoplam`, `goldPriceEffect=altin_{n-1}×(fiyat_n/fiyat_{n-1}−1)`,
+  `otherPart=delta−gold`. Son eleman DEVAM EDEN ay (nowcast: son tamamlanmış ay-sonundan güncel günlük noktaya;
+  gold parçası tarihsel barlarla aynı yöntemle önceki ay-sonu tabanından YENİDEN hesaplanır ki other tutarlı
+  kalsın). `buildSummary` weeklyFlow ile aynı girdileri kullanır → **yeni EVDS/altın çekimi YOK**. Soft-fail:
+  altın yoksa gold/other null, delta dolu (tek-mod bar). typecheck ✅ · 36/36 test ✅ (yeni `computeMonthlyFlow`
+  + summary `monthlyFlow` + gold-unavailable) · dry-run ✅. UI (`Research_publishing_v0`): `MonthlyChangeBars`
+  (WeeklyChangeBars aynası, ay-etiketli X ekseni) haftalık değişim panelinin altında ayrı panelde tüketir.
+- Blocked by: yok. **Çekirdek dashboard + sertleştirme + Faz 5 swap + Faz 6 altın-fiyat + Faz 7 YDY menkul kıymet + Faz 8 haftalık + Faz 9 aylık rezerv değişimi (API+UI) TAMAM.**
 
 ## Development Commands
 ```
@@ -191,7 +201,7 @@ pnpm build && wrangler pages deploy dist  # ya da mevcut Pages projesine route
 |---|---|---|---|
 | M-001 evds-client | `src/evds-client.ts` | ✅ Faz 1-3 (haftalık + günlük + YP mevduat; generic) | sonnet |
 | M-001b gold-client | `src/gold-client.ts` | ✅ Faz 6 (HARİCİ altın fiyatı — Yahoo GC=F; EVDS-only'a dar istisna, soft-fail) | opus |
-| M-002 reserve-engine | `src/reserve-engine.ts` | ✅ Faz 1-8 (`computeWeekly`/`weeklyMeta`/`computeDailyNowcast`/`computeDolarizasyon`/`computeSwapSplit`/`computeGoldPriceEffect`/`computeForeignSecurities`/`computeWeeklyFlow`) | opus |
+| M-002 reserve-engine | `src/reserve-engine.ts` | ✅ Faz 1-9 (`computeWeekly`/`weeklyMeta`/`computeDailyNowcast`/`computeDolarizasyon`/`computeSwapSplit`/`computeGoldPriceEffect`/`computeForeignSecurities`/`computeWeeklyFlow`/`computeMonthlyFlow`) | opus |
 | M-003 api-worker | `src/index.ts` (+ `src/summary.ts`) | ✅ Faz 1-8 (`/api/weekly` + `/api/summary` [+ `dolarizasyon`/`swap`/`goldPriceEffect`/`foreignSecurities`/`weeklyFlow` soft-fail]; fetch+compute+cache `summary.ts`'te, HTTP+cron paylaşır) | sonnet |
 | M-004 dashboard-ui | tqrlab.com repo: `src/components/reserve/*` (`ReserveDashboard`/`AreaChart`/`MetricCards`/`Dolarizasyon`/`SwapCard` + Faz 5: `AsideMetricCard`/`ReserveChangeBars`/`NirChart`/`SwapTrendChart`/`utils`) | ✅ Faz 1-5 (CANLI; light-tema paylaşım/PDF; Faz 5 redesign: main+aside, otomatik swap, yeni grafikler) | sonnet |
 | M-005 scheduled-refresh | `src/scheduled.ts` | ✅ Faz 4 — cron KV ön-ısıtma (`warmCache` → `summary`+`weekly`; `[triggers]` wrangler.toml) | haiku |
