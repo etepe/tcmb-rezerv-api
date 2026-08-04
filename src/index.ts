@@ -4,6 +4,7 @@
 // Faz 3: + /api/summary.dolarizasyon (haftalık YP mevduat; soft-fail).
 // Faz 4: + scheduled() cron — KV ön-ısıtma (M-005, src/scheduled.ts). Fetch+compute
 //        mantığı src/summary.ts'e (buildWeekly/buildSummary) ayrıldı; HTTP + cron AYNI yol.
+// Faz 10: + scheduled() EMAIL_CRON dallanması — günlük rezerv-akışı maili (M-006, src/email.ts).
 
 import type { ApiError, ApiErrorCode } from "./types.ts";
 import { EvdsError } from "./evds-client.ts";
@@ -22,6 +23,7 @@ import {
   writeWeeklyCache,
 } from "./summary.ts";
 import { warmCache } from "./scheduled.ts";
+import { runDailyEmail } from "./email.ts";
 
 // Env tipi summary.ts'te tanımlı; testler ve tüketiciler için buradan re-export edilir.
 export type { Env } from "./summary.ts";
@@ -161,11 +163,18 @@ export default {
   // Faz 4 — Cron Trigger (wrangler.toml [triggers]). KV ön-ısıtma; public sözleşmeyi
   // değiştirmez. Isıtma işin KENDİSİ olduğundan await edilir (platform tamamlanmayı
   // bekler). Hatalar warmCache içinde yutulur (cron handler ASLA fırlatmaz).
+  // Faz 10 — EMAIL_CRON ile eşleşen tetik günlük rezerv-akışı mailine gider; diğer TÜM
+  // tetikler (bilinmeyenler dahil) ön-ısıtmaya düşer (güvenli varsayılan). runDailyEmail
+  // de warmCache gibi ASLA fırlatmaz.
   async scheduled(
-    _event: ScheduledController,
+    event: ScheduledController,
     env: Env,
     _ctx: ExecutionContext,
   ): Promise<void> {
+    if (env.EMAIL_CRON && event.cron === env.EMAIL_CRON) {
+      await runDailyEmail(env);
+      return;
+    }
     await warmCache(env);
   },
 } satisfies ExportedHandler<Env>;

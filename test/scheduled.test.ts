@@ -8,6 +8,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import worker, { type Env } from "../src/index.ts";
 import { summaryKey, todayDdMmYyyy, weeklyKey } from "../src/summary.ts";
+import type { EmailSendMessage } from "../src/types.ts";
 
 // --- EVDS yanıt mock'u (worker-summary.test.ts ile aynı kabul değerleri) ---
 const WEEKLY_ITEMS = [
@@ -129,6 +130,29 @@ test("scheduled: cron SONRASI ilk /api/summary isteği EVDS'e gitmeden cache'ten
     const body = (await res.json()) as SummaryShape;
     assert.equal(body.meta.cached, true, "cron sonrası ilk istek cached=true");
     assert.equal(body.meta.anchorDate, "2026-06-12");
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
+test("scheduled: warm cron'da mail GÖNDERİLMEZ (Faz 10 EMAIL_CRON ayrımı)", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = mockFetch();
+  try {
+    const { env, store } = makeEnv();
+    const calls: EmailSendMessage[] = [];
+    env.EMAIL_SENDER = {
+      send: (m: EmailSendMessage) => {
+        calls.push(m);
+        return Promise.resolve({ messageId: "unused" });
+      },
+    };
+    env.EMAIL_CRON = "30 5,12 * * 1-5";
+
+    await worker.scheduled(fakeController("0 8,12,16 * * 1-5"), env, fakeCtx());
+
+    assert.ok(store.has(summaryKey("01-10-2025", todayDdMmYyyy())), "warm anahtarı yazıldı");
+    assert.equal(calls.length, 0, "warm cron mail atmaz");
   } finally {
     globalThis.fetch = original;
   }
