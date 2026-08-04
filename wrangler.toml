@@ -9,12 +9,23 @@ DAILY_TTL = "3600"              # günlük/summary cache TTL (~1 saat) — /api/
 STALE_TTL = "1209600"           # son-bilinen-iyi fallback TTL (~14 gün) — EVDS bakım/kesintisinde sunulur
 DEFAULT_WEEKLY_START = "01-10-2025"
 YABANCI_MB_FALLBACK = "16.4"    # Yabancı MB swap fallback (mlr USD) — DOVVARNC.K18 çekilemezse (Faz 5)
+EMAIL_TO = "tepe.erdinc@gmail.com"   # Faz 10 — günlük mail alıcısı (Email Routing'de DOĞRULANMIŞ hedef)
+EMAIL_FROM = "rezerv@tqrlab.com"     # Faz 10 — gönderen (tqrlab.com Email Routing domain'inde adres)
+EMAIL_LANG = "both"                  # Faz 10 — mail dili: en | tr | both
+EMAIL_CRON = "30 5,12 * * 1-5"       # Faz 10 — mail tetiği; [triggers].crons'taki üçüncü girdiyle AYNI olmalı
 
 # KV cache. id'yi `wrangler kv namespace create REZERV_CACHE` çıktısıyla doldur.
 [[kv_namespaces]]
 binding = "REZERV_CACHE"
 id = "7cadc8955a4647eb9b2f35fc40a032a7"
 # preview_id = "REPLACE_WITH_PREVIEW_KV_ID"   # `wrangler dev` için (opsiyonel)
+
+# Faz 10 — Cloudflare Email Service gönderim binding'i (M-006, src/email.ts).
+# Doğrulanmış hedef adrese gönderim her planda ÜCRETSİZDİR; API anahtarı/secret gerekmez.
+# Tek seferlik ön koşul (dashboard): tqrlab.com'da Email Routing etkin + hedef adres doğrulanmış.
+[[send_email]]
+name = "EMAIL_SENDER"
+destination_address = "tepe.erdinc@gmail.com"   # sert kilit: binding yalnız bu adrese gönderebilir
 
 # Faz 4 — Cron ön-ısıtma (M-005, src/scheduled.ts). Saatler UTC (TR = UTC+3).
 # scheduled() handler summary + weekly cache anahtarını (UI'nin düştüğü anahtarlar)
@@ -23,5 +34,7 @@ id = "7cadc8955a4647eb9b2f35fc40a032a7"
 #   "0 8,12,16 * * 1-5" : hafta içi (Pzt-Cum) 08/12/16 UTC = 11/15/19 TR — analitik
 #                         bilanço / iş günü (A02/A10/USD) yayımını yakalar.
 #   "0 17 * * 5"        : Cuma 17 UTC = 20 TR — haftalık brüt rezerv (Cuma) yayımı.
+#   "30 5,12 * * 1-5"   : hafta içi 05:30+12:30 UTC = 08:30+15:30 TR — günlük rezerv-akışı
+#                         maili (Faz 10; EMAIL_CRON ile eşleşir → scheduled() maile yönlendirir).
 [triggers]
-crons = ["0 8,12,16 * * 1-5", "0 17 * * 5"]
+crons = ["0 8,12,16 * * 1-5", "0 17 * * 5", "30 5,12 * * 1-5"]

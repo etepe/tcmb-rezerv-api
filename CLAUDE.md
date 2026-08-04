@@ -176,7 +176,18 @@ Baz 27-02-2026 = toplam 210.3 / altın 136.8 / döviz 73.4.
   altın yoksa gold/other null, delta dolu (tek-mod bar). typecheck ✅ · 36/36 test ✅ (yeni `computeMonthlyFlow`
   + summary `monthlyFlow` + gold-unavailable) · dry-run ✅. UI (`Research_publishing_v0`): `MonthlyChangeBars`
   (WeeklyChangeBars aynası, ay-etiketli X ekseni) haftalık değişim panelinin altında ayrı panelde tüketir.
-- Blocked by: yok. **Çekirdek dashboard + sertleştirme + Faz 5 swap + Faz 6 altın-fiyat + Faz 7 YDY menkul kıymet + Faz 8 haftalık + Faz 9 aylık rezerv değişimi (API+UI) TAMAM.**
+- Tamamlanan (Faz 10 — API): günlük rezerv-akışı maili (M-006, `src/email.ts`). SAF `buildReserveEmail`
+  (EN+TR düz metin; `weeklyFlow`/`monthlyFlow` son tamamlanan + devam eden (nowcast) satırları; altın yoksa
+  "(gold/other split unavailable)" tek-mod; `meta.stale` → konu `[stale]` + gövde uyarısı; Bloomberg chat'e
+  kopyala-yapıştır hedefi, tablo yok) + `runDailyEmail` (cron çekirdeği, ASLA fırlatmaz: KV cache → miss'te
+  `buildSummary`+ısıtma → hata'da last-known-good → yoksa atla). Gönderim: Cloudflare Email Service
+  `[[send_email]]` binding (`EMAIL_SENDER`; doğrulanmış hedefe her planda ÜCRETSİZ, secret yok) →
+  `EMAIL_TO`=tepe.erdinc@gmail.com, `EMAIL_FROM`=rezerv@tqrlab.com, `EMAIL_LANG`=both. `scheduled()`
+  `EMAIL_CRON`="30 5,12 * * 1-5" (08:30+15:30 TRT hafta içi) tetiğini maile yönlendirir; diğer TÜM cron'lar
+  ön-ısıtma (dokunulmadı). Tek-seferlik kurulum (dashboard): tqrlab.com Email Routing + hedef adres doğrulama
+  — doğrulama DEPLOY'dan önce. typecheck ✅ · 47/47 test ✅ (builder EN/TR/both + gold-null + stale +
+  dispatch + warm-cron regresyonu) · dry-run ✅.
+- Blocked by: yok. **Çekirdek dashboard + sertleştirme + Faz 5 swap + Faz 6 altın-fiyat + Faz 7 YDY menkul kıymet + Faz 8 haftalık + Faz 9 aylık rezerv değişimi (API+UI) + Faz 10 günlük mail (API) TAMAM.**
 
 ## Development Commands
 ```
@@ -205,6 +216,7 @@ pnpm build && wrangler pages deploy dist  # ya da mevcut Pages projesine route
 | M-003 api-worker | `src/index.ts` (+ `src/summary.ts`) | ✅ Faz 1-8 (`/api/weekly` + `/api/summary` [+ `dolarizasyon`/`swap`/`goldPriceEffect`/`foreignSecurities`/`weeklyFlow` soft-fail]; fetch+compute+cache `summary.ts`'te, HTTP+cron paylaşır) | sonnet |
 | M-004 dashboard-ui | tqrlab.com repo: `src/components/reserve/*` (`ReserveDashboard`/`AreaChart`/`MetricCards`/`Dolarizasyon`/`SwapCard` + Faz 5: `AsideMetricCard`/`ReserveChangeBars`/`NirChart`/`SwapTrendChart`/`utils`) | ✅ Faz 1-5 (CANLI; light-tema paylaşım/PDF; Faz 5 redesign: main+aside, otomatik swap, yeni grafikler) | sonnet |
 | M-005 scheduled-refresh | `src/scheduled.ts` | ✅ Faz 4 — cron KV ön-ısıtma (`warmCache` → `summary`+`weekly`; `[triggers]` wrangler.toml) | haiku |
+| M-006 email | `src/email.ts` | ✅ Faz 10 — günlük rezerv-akışı maili (EN+TR düz metin; `send_email` binding; `EMAIL_CRON` 08:30+15:30 TRT; soft-fail/stale destekli) | sonnet |
 
 ## Conventions
 - TS strict; `any` yok. Para birimleri `number` (milyar USD), tarihler ISO `string`.

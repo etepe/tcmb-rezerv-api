@@ -271,3 +271,27 @@ export interface SummaryResponse {
   monthlyFlow: MonthlyFlowPoint[];
   meta: SummaryMeta;
 }
+
+/**
+ * E-posta gönderim mesajı (Faz 10 — M-006). Cloudflare Email Service `send_email`
+ * binding'inin object-form `send()` API'sinin (2026-04) dar yapısal karşılığı;
+ * `@cloudflare/workers-types` sürümümüz bu formu henüz bilmediğinden burada tanımlanır
+ * (strict-güvenli; testte kolayca mock'lanır).
+ */
+export interface EmailSendMessage {
+  /** Alıcı; verilmezse binding'in `destination_address` değeri kullanılır. */
+  to?: string;
+  /** Gönderen — Email Routing etkin domain'de bir adres olmalı (ör. rezerv@tqrlab.com). */
+  from: string | { email: string; name?: string };
+  subject: string;
+  /** Düz metin gövde (Bloomberg chat'e yapıştırılabilir; HTML kullanılmaz). */
+  text: string;
+}
+
+/** `send_email` binding yüzeyi (object-form). Hata durumunda `E_*` kodlu Error fırlatır. */
+export interface EmailSender {
+  send(msg: EmailSendMessage): Promise<{ messageId: string }>;
+}
+
+/** Mail dili (Faz 10): yalnız İngilizce, yalnız Türkçe ya da ikisi bir gövdede (EN üstte). */
+export type EmailLang = "en" | "tr" | "both";

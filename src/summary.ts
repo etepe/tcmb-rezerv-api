@@ -7,6 +7,7 @@
 
 import type {
   DolarPoint,
+  EmailSender,
   ForeignSecPoint,
   SummaryMeta,
   SummaryResponse,
@@ -48,6 +49,19 @@ export interface Env {
   DEFAULT_WEEKLY_START?: string;
   /** Yabancı MB swap fallback (mlr USD, string). K18 çekilemezse kullanılır. Varsayılan 16.4. */
   YABANCI_MB_FALLBACK?: string;
+  /**
+   * E-posta binding'i (Faz 10, wrangler `[[send_email]]`, name = "EMAIL_SENDER").
+   * Tanımlı değilse mail cron'u loglayıp atlar (çekirdek etkilenmez).
+   */
+  EMAIL_SENDER?: EmailSender;
+  /** Mail alıcısı. Binding'in `destination_address` kilidiyle aynı olmalı. */
+  EMAIL_TO?: string;
+  /** Mail göndereni — Email Routing etkin domain'de adres. Varsayılan rezerv@tqrlab.com. */
+  EMAIL_FROM?: string;
+  /** Mail dili: "en" | "tr" | "both". Varsayılan "both". */
+  EMAIL_LANG?: string;
+  /** Mail cron ifadesi — scheduled() bu tetiği runDailyEmail'e yönlendirir (diğerleri ön-ısıtma). */
+  EMAIL_CRON?: string;
 }
 
 // Seri kodları (evds-client'a verilir; nokta→alt çizgi normalizasyonu engine'de).
