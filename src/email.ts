@@ -224,19 +224,45 @@ function emailLang(env: Env): EmailLang {
   return l === "en" || l === "tr" || l === "both" ? l : "both";
 }
 
-/** Binding ile maili gönderir; binding yoksa ya da gönderim reddedilirse fırlatır (çağıran yakalar). */
+/** Dağıtım listesi: EMAIL_TO virgülle ayrılmış adresler (boşluklar kırpılır, boşlar atılır). */
+function emailRecipients(env: Env): string[] {
+  return (env.EMAIL_TO ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
+
+/**
+ * Maili dağıtım listesindeki HER alıcıya AYRI gönderir (Promise.allSettled — bir alıcının
+ * hatası diğerini engellemez; ör. henüz doğrulanmamış adres E_RECIPIENT_NOT_ALLOWED alır,
+ * kalanlar yine de teslim edilir). Binding yoksa ya da liste boşsa fırlatır (çağıran yakalar).
+ */
 export async function sendReserveEmail(
   env: Env,
   mail: { subject: string; text: string },
-): Promise<{ messageId: string }> {
-  if (!env.EMAIL_SENDER) throw new Error("EMAIL_SENDER binding tanımlı değil.");
-  const msg: EmailSendMessage = {
-    to: env.EMAIL_TO,
-    from: { email: env.EMAIL_FROM ?? "rezerv@tqrlab.com", name: "tqrlab rezerv" },
-    subject: mail.subject,
-    text: mail.text,
-  };
-  return env.EMAIL_SENDER.send(msg);
+): Promise<{ ok: string[]; failed: { to: string; reason: string }[] }> {
+  const sender = env.EMAIL_SENDER;
+  if (!sender) throw new Error("EMAIL_SENDER binding tanımlı değil.");
+  const recipients = emailRecipients(env);
+  if (recipients.length === 0) throw new Error("EMAIL_TO boş — dağıtım listesi tanımsız.");
+
+  const from = { email: env.EMAIL_FROM ?? "rezerv@tqrlab.com", name: "tqrlab rezerv" };
+  const results = await Promise.allSettled(
+    recipients.map((to) => {
+      const msg: EmailSendMessage = { to, from, subject: mail.subject, text: mail.text };
+      return sender.send(msg);
+    }),
+  );
+
+  const ok: string[] = [];
+  const failed: { to: string; reason: string }[] = [];
+  recipients.forEach((to, i) => {
+    const r = results[i];
+    if (!r) return;
+    if (r.status === "fulfilled") ok.push(`${to} (${r.value.messageId})`);
+    else failed.push({ to, reason: r.reason instanceof Error ? r.reason.message : String(r.reason) });
+  });
+  return { ok, failed };
 }
 
 /**
@@ -277,8 +303,10 @@ export async function runDailyEmail(env: Env): Promise<void> {
 
   try {
     const mail = buildReserveEmail(summary, { lang: emailLang(env), now: new Date() });
-    const { messageId } = await sendReserveEmail(env, mail);
-    console.log(`[email] gönderildi (messageId=${messageId}).`);
+    const { ok, failed } = await sendReserveEmail(env, mail);
+    if (ok.length > 0) console.log(`[email] gönderildi: ${ok.join(", ")}`);
+    for (const f of failed) console.error(`[email] gönderilemedi (${f.to}): ${f.reason}`);
+    if (ok.length === 0) console.error("[email] hiçbir alıcıya gönderilemedi.");
   } catch (e) {
     const reason = e instanceof Error ? e.message : String(e);
     console.error(`[email] gönderim hatası: ${reason}`);
