@@ -9,7 +9,7 @@ DAILY_TTL = "3600"              # günlük/summary cache TTL (~1 saat) — /api/
 STALE_TTL = "1209600"           # son-bilinen-iyi fallback TTL (~14 gün) — EVDS bakım/kesintisinde sunulur
 DEFAULT_WEEKLY_START = "01-10-2025"
 YABANCI_MB_FALLBACK = "16.4"    # Yabancı MB swap fallback (mlr USD) — DOVVARNC.K18 çekilemezse (Faz 5)
-EMAIL_TO = "tepe.erdinc@gmail.com"   # Faz 10 — günlük mail alıcısı (Email Routing'de DOĞRULANMIŞ hedef)
+EMAIL_TO = "tepe.erdinc@gmail.com,erdinc.tepe@bgcg.com"   # Faz 10 — dağıtım listesi (virgüllü; hepsi DOĞRULANMIŞ hedef)
 EMAIL_FROM = "rezerv@tqrlab.com"     # Faz 10 — gönderen (tqrlab.com Email Routing domain'inde adres)
 EMAIL_LANG = "both"                  # Faz 10 — mail dili: en | tr | both
 EMAIL_CRON = "30 5,12 * * 1-5"       # Faz 10 — mail tetiği; [triggers].crons'taki üçüncü girdiyle AYNI olmalı
@@ -25,7 +25,8 @@ id = "7cadc8955a4647eb9b2f35fc40a032a7"
 # Tek seferlik ön koşul (dashboard): tqrlab.com'da Email Routing etkin + hedef adres doğrulanmış.
 [[send_email]]
 name = "EMAIL_SENDER"
-destination_address = "tepe.erdinc@gmail.com"   # sert kilit: binding yalnız bu adrese gönderebilir
+# İzin listesi: binding YALNIZ bu adreslere gönderebilir (EMAIL_TO ile eş tutulmalı).
+allowed_destination_addresses = ["tepe.erdinc@gmail.com", "erdinc.tepe@bgcg.com"]
 
 # Faz 4 — Cron ön-ısıtma (M-005, src/scheduled.ts). Saatler UTC (TR = UTC+3).
 # scheduled() handler summary + weekly cache anahtarını (UI'nin düştüğü anahtarlar)

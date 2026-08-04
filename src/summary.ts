@@ -54,7 +54,10 @@ export interface Env {
    * Tanımlı değilse mail cron'u loglayıp atlar (çekirdek etkilenmez).
    */
   EMAIL_SENDER?: EmailSender;
-  /** Mail alıcısı. Binding'in `destination_address` kilidiyle aynı olmalı. */
+  /**
+   * Mail dağıtım listesi — virgülle ayrılmış adresler. Her adres Email Routing'de
+   * DOĞRULANMIŞ hedef ve binding'in `allowed_destination_addresses` listesinde olmalı.
+   */
   EMAIL_TO?: string;
   /** Mail göndereni — Email Routing etkin domain'de adres. Varsayılan rezerv@tqrlab.com. */
   EMAIL_FROM?: string;

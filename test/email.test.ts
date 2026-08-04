@@ -302,6 +302,38 @@ test("dispatch: hiç veri yoksa mail atlanır ve cron fırlatmaz", async () => {
   }
 });
 
+test("dispatch: çoklu alıcı — her adrese ayrı mail; biri reddedilse diğeri teslim edilir", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = throwingFetch;
+  try {
+    const calls: EmailSendMessage[] = [];
+    const sender: EmailSender = {
+      send: (m: EmailSendMessage) => {
+        calls.push(m);
+        if (m.to === "erdinc.tepe@bgcg.com") {
+          return Promise.reject(new Error("E_RECIPIENT_NOT_ALLOWED"));
+        }
+        return Promise.resolve({ messageId: `id-${calls.length}` });
+      },
+    };
+    const { env, store } = makeEnv(sender);
+    env.EMAIL_TO = "tepe.erdinc@gmail.com, erdinc.tepe@bgcg.com"; // boşluk: trim testi
+    store.set(summaryKey(START, todayDdMmYyyy()), JSON.stringify(makeSummary()));
+
+    await worker.scheduled(fakeController(EMAIL_CRON), env, fakeCtx());
+
+    assert.equal(calls.length, 2, "iki alıcıya iki ayrı send");
+    assert.deepEqual(
+      calls.map((m) => m.to).sort(),
+      ["erdinc.tepe@bgcg.com", "tepe.erdinc@gmail.com"],
+      "alıcılar doğru (trim edilmiş)",
+    );
+    // bgcg reddedildi ama cron fırlatmadı ve gmail gönderimi tamamlandı (allSettled).
+  } finally {
+    globalThis.fetch = original;
+  }
+});
+
 test("dispatch: binding yoksa EMAIL_CRON tetiği sessizce atlar (fırlatmaz)", async () => {
   const original = globalThis.fetch;
   globalThis.fetch = throwingFetch;

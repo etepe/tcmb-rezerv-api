@@ -181,8 +181,10 @@ Baz 27-02-2026 = toplam 210.3 / altın 136.8 / döviz 73.4.
   "(gold/other split unavailable)" tek-mod; `meta.stale` → konu `[stale]` + gövde uyarısı; Bloomberg chat'e
   kopyala-yapıştır hedefi, tablo yok) + `runDailyEmail` (cron çekirdeği, ASLA fırlatmaz: KV cache → miss'te
   `buildSummary`+ısıtma → hata'da last-known-good → yoksa atla). Gönderim: Cloudflare Email Service
-  `[[send_email]]` binding (`EMAIL_SENDER`; doğrulanmış hedefe her planda ÜCRETSİZ, secret yok) →
-  `EMAIL_TO`=tepe.erdinc@gmail.com, `EMAIL_FROM`=rezerv@tqrlab.com, `EMAIL_LANG`=both. `scheduled()`
+  `[[send_email]]` binding (`EMAIL_SENDER`; doğrulanmış hedefe her planda ÜCRETSİZ, secret yok;
+  `allowed_destination_addresses` izin listesi) → `EMAIL_TO` virgüllü DAĞITIM LİSTESİ
+  (tepe.erdinc@gmail.com + erdinc.tepe@bgcg.com; alıcı-başına AYRI gönderim, allSettled —
+  biri reddedilse kalanlar teslim edilir), `EMAIL_FROM`=rezerv@tqrlab.com, `EMAIL_LANG`=both. `scheduled()`
   `EMAIL_CRON`="30 5,12 * * 1-5" (08:30+15:30 TRT hafta içi) tetiğini maile yönlendirir; diğer TÜM cron'lar
   ön-ısıtma. Warm cron'lar TEK girdiye birleşti: "0 8,12,16,17 * * 1-5" (Workers Free hesap limiti
   5 cron/hesap — kod 10072; bu worker 2 girdi kullanır, Cuma 17 UTC haftalık-yayım warm'ı korunur).
