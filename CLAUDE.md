@@ -184,7 +184,9 @@ Baz 27-02-2026 = toplam 210.3 / altın 136.8 / döviz 73.4.
   `[[send_email]]` binding (`EMAIL_SENDER`; doğrulanmış hedefe her planda ÜCRETSİZ, secret yok) →
   `EMAIL_TO`=tepe.erdinc@gmail.com, `EMAIL_FROM`=rezerv@tqrlab.com, `EMAIL_LANG`=both. `scheduled()`
   `EMAIL_CRON`="30 5,12 * * 1-5" (08:30+15:30 TRT hafta içi) tetiğini maile yönlendirir; diğer TÜM cron'lar
-  ön-ısıtma (dokunulmadı). Tek-seferlik kurulum (dashboard): tqrlab.com Email Routing + hedef adres doğrulama
+  ön-ısıtma. Warm cron'lar TEK girdiye birleşti: "0 8,12,16,17 * * 1-5" (Workers Free hesap limiti
+  5 cron/hesap — kod 10072; bu worker 2 girdi kullanır, Cuma 17 UTC haftalık-yayım warm'ı korunur).
+  Tek-seferlik kurulum (dashboard): tqrlab.com Email Routing + hedef adres doğrulama
   — doğrulama DEPLOY'dan önce. typecheck ✅ · 47/47 test ✅ (builder EN/TR/both + gold-null + stale +
   dispatch + warm-cron regresyonu) · dry-run ✅.
 - Blocked by: yok. **Çekirdek dashboard + sertleştirme + Faz 5 swap + Faz 6 altın-fiyat + Faz 7 YDY menkul kıymet + Faz 8 haftalık + Faz 9 aylık rezerv değişimi (API+UI) + Faz 10 günlük mail (API) TAMAM.**

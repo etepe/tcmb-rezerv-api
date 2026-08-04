@@ -30,11 +30,12 @@ destination_address = "tepe.erdinc@gmail.com"   # sert kilit: binding yalnız bu
 # Faz 4 — Cron ön-ısıtma (M-005, src/scheduled.ts). Saatler UTC (TR = UTC+3).
 # scheduled() handler summary + weekly cache anahtarını (UI'nin düştüğü anahtarlar)
 # tazeler → kullanıcı (ve CI smoke) hep SICAK cache'e düşer. Public sözleşme DEĞİŞMEZ.
-# Mütevazı sıklık — EVDS dövülmez (~16 tetik/hafta):
-#   "0 8,12,16 * * 1-5" : hafta içi (Pzt-Cum) 08/12/16 UTC = 11/15/19 TR — analitik
-#                         bilanço / iş günü (A02/A10/USD) yayımını yakalar.
-#   "0 17 * * 5"        : Cuma 17 UTC = 20 TR — haftalık brüt rezerv (Cuma) yayımı.
-#   "30 5,12 * * 1-5"   : hafta içi 05:30+12:30 UTC = 08:30+15:30 TR — günlük rezerv-akışı
-#                         maili (Faz 10; EMAIL_CRON ile eşleşir → scheduled() maile yönlendirir).
+# DİKKAT — Workers Free: hesap başına TOPLAM 5 cron tetiği (kod 10072); diğer worker'larla
+# paylaşılır. Bu yüzden warm cron'ları TEK girdide birleşik tutulur (bu worker toplam 2 girdi):
+#   "0 8,12,16,17 * * 1-5" : hafta içi 08/12/16 UTC = 11/15/19 TR — analitik bilanço / iş günü
+#                            (A02/A10/USD) yayımını yakalar; 17 UTC = 20 TR ayağı Cuma haftalık
+#                            brüt rezerv yayımını da kapsar (Pzt-Per 17 UTC zararsız ekstra warm).
+#   "30 5,12 * * 1-5"      : hafta içi 05:30+12:30 UTC = 08:30+15:30 TR — günlük rezerv-akışı
+#                            maili (Faz 10; EMAIL_CRON ile eşleşir → scheduled() maile yönlendirir).
 [triggers]
-crons = ["0 8,12,16 * * 1-5", "0 17 * * 5", "30 5,12 * * 1-5"]
+crons = ["0 8,12,16,17 * * 1-5", "30 5,12 * * 1-5"]
