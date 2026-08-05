@@ -97,7 +97,7 @@ const STRINGS: Record<Lang, Strings> = {
     stale: (date) =>
       `Warning: source data currently unreachable; figures are from the last successful update (${date}).`,
     note:
-      'Note: "other" = FX flows + parity effects (not pure intervention); gold is valuation-only. Source: TCMB EVDS + tqrlab nowcast.',
+      'Note: "other" = FX flows + parity effects (not pure intervention); gold is valuation-only. Source: TCMB EVDS; nowcast calculated in-house.',
   },
   tr: {
     title: "TCMB Brüt Rezervler",
@@ -119,7 +119,7 @@ const STRINGS: Record<Lang, Strings> = {
     stale: (date) =>
       `Uyarı: kaynak veriye şu an ulaşılamıyor; rakamlar son başarılı güncellemeye aittir (${date}).`,
     note:
-      'Not: "diğer" = döviz akışları + parite etkileri (saf müdahale değildir); altın yalnız fiyat değerlemesidir. Kaynak: TCMB EVDS + tqrlab nowcast.',
+      'Not: "diğer" = döviz akışları + parite etkileri (saf müdahale değildir); altın yalnız fiyat değerlemesidir. Kaynak: TCMB EVDS; nowcast kurum içi hesaplamadır.',
   },
 };
 
