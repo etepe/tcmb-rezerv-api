@@ -187,10 +187,25 @@ Baz 27-02-2026 = toplam 210.3 / altın 136.8 / döviz 73.4.
   biri reddedilse kalanlar teslim edilir), `EMAIL_FROM`=rezerv@tqrlab.com, `EMAIL_LANG`=both. `scheduled()`
   `EMAIL_CRON`="30 5,12 * * 1-5" (08:30+15:30 TRT hafta içi) tetiğini maile yönlendirir; diğer TÜM cron'lar
   ön-ısıtma. Warm cron'lar TEK girdiye birleşti: "0 8,12,16,17 * * 1-5" (Workers Free hesap limiti
-  5 cron/hesap — kod 10072; bu worker 2 girdi kullanır, Cuma 17 UTC haftalık-yayım warm'ı korunur).
+  5 cron/hesap — kod 10072; bu worker 2 girdi kullanır. Haftalık baskı Perşembe 11:30 UTC → 12 UTC ayağı yakalar).
   Tek-seferlik kurulum (dashboard): tqrlab.com Email Routing + hedef adres doğrulama
   — doğrulama DEPLOY'dan önce. typecheck ✅ · 47/47 test ✅ (builder EN/TR/both + gold-null + stale +
   dispatch + warm-cron regresyonu) · dry-run ✅.
+- Tamamlanan (Faz 10b — mail dönem etiketleri): **TCMB yayım takvimi teşhisi + etiket düzeltmesi.**
+  Resmi haftalık (`TP.AB.TOPLAM`) **Perşembe 14:30 TRT**'de ÖNCEKİ Cuma'ya ait yayımlanır → çıpa
+  **6-12 gün** geride olabilir (06-08-2026 09:08 TRT cache'siz canlı çekim: `latestWeekly=2026-07-24`,
+  `latestDaily=2026-08-04`; 31 Tem henüz YOK — bizde pencere/cache hatası yok). Sonuçları: (a) günlük
+  "rezerv akışı" barları `[çıpa,bugün]` olduğu için **5↔10 iş günü** salınır; (b) devam eden HAFTA barı
+  8-12 gün sürebilir (24 Tem→4 Ağu = 11 gün); (c) devam eden AY barı, ayın ilk günlerinde o ayda henüz
+  yayımlanmış Cuma olmadığından İKİ AYI kapsayabilir (26 Haz→4 Ağu = 39 gün; `MonthlyFlowPoint.ay`
+  son barda yanıltıcı → UI X ekseni `prevTarih`/`tarih`'ten türetmeli). **Karar (kullanıcı): model
+  DEĞİŞMEZ** (nowcast'tan sanal Cuma/ay-sonu üretilmez) → yalnız `src/email.ts` etiket/aralık:
+  nowcast satırlarında dönem uzunluğu açık ("24 Tem -> 04 Ağu, 11 gün, nowcast"); >7 günde
+  "Hafta içi kümüle" → "Son resmi haftadan bu yana"; ay barı temiz değilse (ay farkı ≠1 **veya** taban
+  ayın son Cuma'sından ≥5 gün geride) "Ay içi kümüle" → "Son resmi ay sonundan bu yana"; çıpa
+  gecikmeliyse yayım takvimini anlatan tek satır not. Saf yardımcılar: `daysBetween`/`lastFridayDom`/
+  `monthsBetween`/`isCleanMonthToDate`. Public API sözleşmesi + hesaplama AYNEN korunur.
+  typecheck ✅ · 50/50 test ✅ · dry-run ✅. UI aynası: `ui/HANDOFF-flow-labels.md` (tqrlab.com repo).
 - Blocked by: yok. **Çekirdek dashboard + sertleştirme + Faz 5 swap + Faz 6 altın-fiyat + Faz 7 YDY menkul kıymet + Faz 8 haftalık + Faz 9 aylık rezerv değişimi (API+UI) + Faz 10 günlük mail (API) TAMAM.**
 
 ## Development Commands

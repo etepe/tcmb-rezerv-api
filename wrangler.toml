@@ -34,8 +34,9 @@ allowed_destination_addresses = ["tepe.erdinc@gmail.com", "erdinc.tepe@bgcg.com"
 # DİKKAT — Workers Free: hesap başına TOPLAM 5 cron tetiği (kod 10072); diğer worker'larla
 # paylaşılır. Bu yüzden warm cron'ları TEK girdide birleşik tutulur (bu worker toplam 2 girdi):
 #   "0 8,12,16,17 * * 1-5" : hafta içi 08/12/16 UTC = 11/15/19 TR — analitik bilanço / iş günü
-#                            (A02/A10/USD) yayımını yakalar; 17 UTC = 20 TR ayağı Cuma haftalık
-#                            brüt rezerv yayımını da kapsar (Pzt-Per 17 UTC zararsız ekstra warm).
+#                            (A02/A10/USD) yayımını yakalar. HAFTALIK brüt rezerv baskısı
+#                            PERŞEMBE 14:30 TRT = 11:30 UTC'dir (önceki Cuma'ya ait) → 12 UTC
+#                            ayağı bunu 30 dk sonra yakalar; 16/17 UTC ayakları ekstra tazelik.
 #   "30 5,12 * * 1-5"      : hafta içi 05:30+12:30 UTC = 08:30+15:30 TR — günlük rezerv-akışı
 #                            maili (Faz 10; EMAIL_CRON ile eşleşir → scheduled() maile yönlendirir).
 [triggers]
