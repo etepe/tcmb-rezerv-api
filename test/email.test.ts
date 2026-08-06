@@ -83,14 +83,17 @@ test("email: EN mutlu yol — konu, seviye, haftalık+aylık satırlar, caveat, 
     "tamamlanan hafta satırı",
   );
   assert.ok(
-    text.includes("- Week-to-date (31 Jul -> 03 Aug, nowcast): +1.5 bn USD | gold valuation +0.9 | other +0.6"),
-    "devam eden hafta (nowcast) satırı",
+    text.includes("- Week-to-date (31 Jul -> 03 Aug, 3 days, nowcast): +1.5 bn USD | gold valuation +0.9 | other +0.6"),
+    "devam eden hafta (nowcast) satırı — aralık uzunluğu açık",
   );
   assert.ok(
     text.includes("- Last completed month (26 Jun -> 31 Jul): +4.3 bn USD | gold valuation +2.1 | other +2.2"),
     "tamamlanan ay satırı",
   );
-  assert.ok(text.includes("- Month-to-date (31 Jul -> 03 Aug, nowcast): +1.5 bn USD"), "devam eden ay satırı");
+  assert.ok(text.includes("- Month-to-date (31 Jul -> 03 Aug, 3 days, nowcast): +1.5 bn USD"), "devam eden ay satırı");
+  assert.ok(!text.includes("Since last official week"), "taban güncelken uzun-dönem etiketi yok");
+  assert.ok(!text.includes("Since last official month-end"), "ay-sonu resmiyken uzun-dönem etiketi yok");
+  assert.ok(!text.includes("released Thu 14:30 TRT"), "gecikme yokken açıklama satırı eklenmez");
   assert.ok(text.includes("not pure intervention"), "caveat korunur");
   assert.ok(!text.includes("<"), "HTML işareti yok (düz metin)");
   assert.ok(text.split("\n").length <= 14, "EN blok kısa (<= 14 satır)");
@@ -152,6 +155,63 @@ test("email: nowcast/veri yoksa 'n/a' — fırlatmaz", () => {
   assert.ok(text.includes("- Week-to-date: n/a"), "devam eden hafta yoksa n/a");
   assert.ok(text.includes("- Last completed month: n/a"), "aylık veri yoksa n/a");
   assert.ok(text.includes("- Month-to-date: n/a"), "devam eden ay yoksa n/a");
+});
+
+test("email: resmi Cuma baskısı gecikmeli — etiket+aralık dönemin GERÇEK uzunluğunu söyler", () => {
+  // Gerçek vaka (06-08-2026 sabahı): TCMB haftalık baskısı Perşembe 14:30 TRT'de yayımlanır,
+  // 31 Tem henüz yok → çıpa 24 Tem. Devam eden "hafta" 11 gün; aylık tabanı da Temmuz sonu değil.
+  const s = makeSummary({
+    weeklyFlow: [
+      { tarih: "2026-07-24", prevTarih: "2026-07-17", delta: 2.1, goldPriceEffect: 1.3, otherPart: 0.8 },
+      { tarih: "2026-08-04", prevTarih: "2026-07-24", delta: 4.9, goldPriceEffect: -0.8, otherPart: 5.7, nowcast: true },
+    ],
+    monthlyFlow: [
+      { ay: "2026-06", tarih: "2026-06-26", prevTarih: "2026-05-29", delta: -1.1, goldPriceEffect: 0.4, otherPart: -1.5 },
+      { ay: "2026-08", tarih: "2026-08-04", prevTarih: "2026-07-24", delta: 4.9, goldPriceEffect: -0.8, otherPart: 5.7, nowcast: true },
+    ],
+    meta: { anchorDate: "2026-07-24", anchorBrut: 162.6, latestWeekly: "2026-07-24", latestDaily: "2026-08-04" },
+  });
+
+  const en = buildReserveEmail(s, { lang: "en", now: new Date("2026-08-06T05:30:00Z") }).text;
+  assert.ok(
+    en.includes("- Since last official week (24 Jul -> 04 Aug, 11 days, nowcast): +4.9 bn USD"),
+    "7 günü aşan devam eden dönem 'hafta' diye etiketlenmez",
+  );
+  assert.ok(!en.includes("- Week-to-date"), "yanıltıcı 'Week-to-date' etiketi kullanılmaz");
+  assert.ok(
+    en.includes("- Since last official month-end (24 Jul -> 04 Aug, 11 days, nowcast):"),
+    "ay tabanı resmi ay-sonu değilse 'ay içi kümüle' denmez",
+  );
+  assert.ok(en.includes("the latest available is 24 Jul, so the ranges above span 11 days"), "gecikme açıklaması");
+
+  const tr = buildReserveEmail(s, { lang: "tr", now: new Date("2026-08-06T05:30:00Z") }).text;
+  assert.ok(tr.includes("- Son resmi haftadan bu yana (24 Tem -> 04 Ağu, 11 gün, nowcast):"), "TR uzun-dönem etiketi");
+  assert.ok(
+    tr.includes("- Son resmi ay sonundan bu yana (24 Tem -> 04 Ağu, 11 gün, nowcast):"),
+    "TR ay uzun-dönem etiketi",
+  );
+  assert.ok(tr.includes("bir hafta değil 11 gün kapsar"), "TR gecikme açıklaması");
+
+  // Hesaplama DEĞİŞMEDİ: delta ve ayrıştırma parçaları aynen aktarılır (yalnız etiket/aralık).
+  assert.ok(en.includes("gold valuation -0.8 | other +5.7"), "ayrıştırma değerleri korunur");
+});
+
+test("email: devam eden ay barı iki ayı kapsıyorsa 'ay içi kümüle' denmez", () => {
+  // Ayın ilk günlerinde o ayda henüz yayımlanmış Cuma yoktur → computeMonthlyFlow'un son ay
+  // temsilcisi bir ay geride kalır ve devam eden bar iki ayı birden kapsar (canlı vaka:
+  // 26 Haz -> 04 Ağu = 39 gün). Etiket bunu saklamamalı.
+  const s = makeSummary({
+    monthlyFlow: [
+      { ay: "2026-06", tarih: "2026-06-26", prevTarih: "2026-05-29", delta: -1.1, goldPriceEffect: 0.4, otherPart: -1.5 },
+      { ay: "2026-07", tarih: "2026-08-04", prevTarih: "2026-06-26", delta: 18.3, goldPriceEffect: -1.0, otherPart: 19.3, nowcast: true },
+    ],
+  });
+  const { text } = buildReserveEmail(s, { lang: "en", now: new Date("2026-08-06T05:30:00Z") });
+  assert.ok(
+    text.includes("- Since last official month-end (26 Jun -> 04 Aug, 39 days, nowcast): +18.3 bn USD"),
+    "39 günlük iki-aylı bar 'Month-to-date' diye etiketlenmez",
+  );
+  assert.ok(!text.includes("- Month-to-date"), "yanıltıcı 'Month-to-date' etiketi kullanılmaz");
 });
 
 // --- dispatch (worker.scheduled + mock sender) -----------------------------------

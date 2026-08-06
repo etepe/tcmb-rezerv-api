@@ -55,6 +55,55 @@ function fmtSigned(v: number, lang: Lang): string {
   return `${sign}${lang === "tr" ? s.replace(".", ",") : s}`;
 }
 
+/** ISO tarih → UTC epoch (gün farkı için). Geçersizse NaN. */
+function isoToUtc(iso: string): number {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+  return m ? Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : NaN;
+}
+
+/** İki ISO tarih arasındaki TAKVİM günü farkı (b − a); hesaplanamazsa null. */
+function daysBetween(a: string, b: string): number | null {
+  const ta = isoToUtc(a);
+  const tb = isoToUtc(b);
+  if (Number.isNaN(ta) || Number.isNaN(tb)) return null;
+  return Math.round((tb - ta) / 86_400_000);
+}
+
+/** Verilen ISO tarihin ayındaki SON Cuma'nın ayın kaçıncı günü olduğu. */
+function lastFridayDom(iso: string): number | null {
+  const m = /^(\d{4})-(\d{2})-\d{2}$/.exec(iso);
+  if (!m) return null;
+  // Bir sonraki ayın 0. günü = bu ayın son günü.
+  const last = new Date(Date.UTC(Number(m[1]), Number(m[2]), 0));
+  return last.getUTCDate() - ((last.getUTCDay() - 5 + 7) % 7);
+}
+
+/** İki ISO tarihin AY farkı (b − a, takvim ayı); hesaplanamazsa null. */
+function monthsBetween(a: string, b: string): number | null {
+  const ma = /^(\d{4})-(\d{2})/.exec(a);
+  const mb = /^(\d{4})-(\d{2})/.exec(b);
+  if (!ma || !mb) return null;
+  return (Number(mb[1]) * 12 + Number(mb[2])) - (Number(ma[1]) * 12 + Number(ma[2]));
+}
+
+/**
+ * Devam eden AY barı gerçekten "ay içi kümüle" mi? İki koşul birden gerekir:
+ *  1) taban, bitiş ayının HEMEN ÖNCEKİ ayında olmalı — resmi haftalık baskı gecikince
+ *     `computeMonthlyFlow` içindeki son ay temsilcisi bir ay geride kalabilir (ör. Ağustos'ta
+ *     henüz yayımlanmış Cuma yokken taban 26 Haz olur → bar 39 gün, iki ayı kapsar);
+ *  2) taban, ait olduğu ayın son Cuma'sına yakın olmalı — aksi halde ay-sonu resmi baskısı
+ *     henüz yayımlanmamıştır (ör. taban 24 Tem iken Temmuz sonu 31 Tem). 5 günlük tolerans
+ *     tatil kaynaklı 1-2 günlük kaymaları yanlışlıkla "eksik" saymamak içindir.
+ * Koşullar sağlanmazsa etiket "son resmi ay sonundan bu yana"ya döner (hesap DEĞİŞMEZ).
+ */
+function isCleanMonthToDate(prevTarih: string, tarih: string): boolean {
+  if (monthsBetween(prevTarih, tarih) !== 1) return false;
+  const lastFri = lastFridayDom(prevTarih);
+  const dom = Number(prevTarih.slice(8, 10));
+  if (lastFri === null || Number.isNaN(dom)) return false;
+  return lastFri - dom < 5;
+}
+
 /** Dil başına sabit metinler (profesyonel sell-side tonu; Bloomberg'e yapıştırılabilir). */
 interface Strings {
   title: string;
@@ -65,8 +114,16 @@ interface Strings {
   monthlyHead: string;
   weeklyCompleted: string;
   weeklyOngoing: string;
+  /** Devam eden "hafta" 7 günü aşınca (resmi Cuma baskısı gecikmeli) kullanılan etiket. */
+  weeklyOngoingLong: string;
   monthlyCompleted: string;
   monthlyOngoing: string;
+  /** Devam eden ay barı tam bir "ay içi kümüle" değilse (gecikmeli/eksik taban) kullanılan etiket. */
+  monthlyOngoingLong: string;
+  /** Aralık uzunluğu rozeti: "11 days" / "11 gün". */
+  span: (days: number) => string;
+  /** Resmi haftalık baskı gecikmeliyken eklenen açıklama satırı. */
+  lagNote: (anchorDate: string, days: number) => string;
   nowcastTag: string;
   gold: string;
   other: string;
@@ -87,8 +144,13 @@ const STRINGS: Record<Lang, Strings> = {
     monthlyHead: "Monthly change decomposition:",
     weeklyCompleted: "Last completed week",
     weeklyOngoing: "Week-to-date",
+    weeklyOngoingLong: "Since last official week",
     monthlyCompleted: "Last completed month",
     monthlyOngoing: "Month-to-date",
+    monthlyOngoingLong: "Since last official month-end",
+    span: (days) => `${days} ${days === 1 ? "day" : "days"}`,
+    lagNote: (anchorDate, days) =>
+      `Note: the official weekly print is released Thu 14:30 TRT for the preceding Friday; the latest available is ${anchorDate}, so the ranges above span ${days} days rather than one week.`,
     nowcastTag: ", nowcast",
     gold: "gold valuation",
     other: "other",
@@ -109,8 +171,13 @@ const STRINGS: Record<Lang, Strings> = {
     monthlyHead: "Aylık değişim ayrıştırması:",
     weeklyCompleted: "Son tamamlanan hafta",
     weeklyOngoing: "Hafta içi kümüle",
+    weeklyOngoingLong: "Son resmi haftadan bu yana",
     monthlyCompleted: "Son tamamlanan ay",
     monthlyOngoing: "Ay içi kümüle",
+    monthlyOngoingLong: "Son resmi ay sonundan bu yana",
+    span: (days) => `${days} gün`,
+    lagNote: (anchorDate, days) =>
+      `Not: resmi haftalık baskı, önceki Cuma'ya ait olarak Perşembe 14:30 TRT'de yayımlanır; elde en güncel ${anchorDate} olduğu için yukarıdaki aralıklar bir hafta değil ${days} gün kapsar.`,
     nowcastTag: ", nowcast",
     gold: "altın değerleme",
     other: "diğer",
@@ -143,12 +210,21 @@ function ongoingPoint<T extends { nowcast?: boolean }>(points: T[]): T | undefin
 }
 
 /**
- * Tek ayrıştırma satırı: "- {etiket} ({önce} -> {sonra}[, nowcast]): Δ | altın | diğer".
+ * Tek ayrıştırma satırı: "- {etiket} ({önce} -> {sonra}[, N gün][, nowcast]): Δ | altın | diğer".
  * Altın parçası null ise (soft-fail) yalnız Δ + "ayrıştırma yok" yazılır — asla "null" değil.
+ *
+ * Devam eden (nowcast) satırlarda aralık uzunluğu AÇIKÇA yazılır: bu satırların tabanı son
+ * RESMİ Cuma'dır ve TCMB haftalık baskısı Perşembe 14:30 TRT'de yayımlandığı için taban 6-12
+ * gün geride olabilir → "hafta içi" etiketi tek başına yanıltıcı olur (etiket de renderBlock'ta
+ * 7 günü aşınca değişir). Hesaplama DEĞİŞMEZ; yalnız dönem uzunluğu şeffaflaşır.
  */
 function flowLine(label: string, p: FlowPoint | undefined, s: Strings, lang: Lang, isOngoing: boolean): string {
   if (!p) return `- ${label}: ${s.na}`;
-  const range = `${fmtDate(p.prevTarih, lang)} -> ${fmtDate(p.tarih, lang)}${isOngoing ? s.nowcastTag : ""}`;
+  const days = isOngoing ? daysBetween(p.prevTarih, p.tarih) : null;
+  const spanTag = days !== null && days > 0 ? `, ${s.span(days)}` : "";
+  const range = `${fmtDate(p.prevTarih, lang)} -> ${fmtDate(p.tarih, lang)}${spanTag}${
+    isOngoing ? s.nowcastTag : ""
+  }`;
   const delta = `${fmtSigned(p.delta, lang)} ${s.unit}`;
   if (p.goldPriceEffect === null || p.otherPart === null) {
     return `- ${label} (${range}): ${delta} ${s.splitUnavailable}`;
@@ -179,14 +255,32 @@ function renderBlock(summary: SummaryResponse, lang: Lang, reportDate: string): 
     lines.push(s.levelOfficial(fmtLevel(summary.meta.anchorBrut, lang), fmtDate(summary.meta.anchorDate, lang)));
   }
   lines.push("");
+
+  // Devam eden hafta/ay satırları son RESMİ Cuma'dan ölçülür; TCMB haftalık baskısı Perşembe
+  // 14:30 TRT'de (önceki Cuma'ya ait) yayımlandığından bu taban 6-12 gün geride olabilir.
+  // Etiketler bu durumda dönemin GERÇEK uzunluğunu yansıtacak şekilde değişir (hesap aynı).
+  const weeklyOngoing = ongoingPoint(summary.weeklyFlow);
+  const weeklyDays = weeklyOngoing ? daysBetween(weeklyOngoing.prevTarih, weeklyOngoing.tarih) : null;
+  const weeklyLagging = weeklyDays !== null && weeklyDays > 7;
+  const weeklyLabel = weeklyLagging ? s.weeklyOngoingLong : s.weeklyOngoing;
+
+  const monthlyOngoing = ongoingPoint(summary.monthlyFlow);
+  const monthlyLabel =
+    !monthlyOngoing || isCleanMonthToDate(monthlyOngoing.prevTarih, monthlyOngoing.tarih)
+      ? s.monthlyOngoing
+      : s.monthlyOngoingLong;
+
   lines.push(s.weeklyHead);
   lines.push(flowLine(s.weeklyCompleted, lastCompleted(summary.weeklyFlow), s, lang, false));
-  lines.push(flowLine(s.weeklyOngoing, ongoingPoint(summary.weeklyFlow), s, lang, true));
+  lines.push(flowLine(weeklyLabel, weeklyOngoing, s, lang, true));
   lines.push("");
   lines.push(s.monthlyHead);
   lines.push(flowLine(s.monthlyCompleted, lastCompleted(summary.monthlyFlow), s, lang, false));
-  lines.push(flowLine(s.monthlyOngoing, ongoingPoint(summary.monthlyFlow), s, lang, true));
+  lines.push(flowLine(monthlyLabel, monthlyOngoing, s, lang, true));
   lines.push("");
+  if (weeklyLagging && weeklyDays !== null) {
+    lines.push(s.lagNote(fmtDate(summary.meta.anchorDate, lang), weeklyDays));
+  }
   lines.push(s.note);
   return lines.join("\n");
 }
