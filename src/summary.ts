@@ -132,13 +132,21 @@ export function defaultStart(env: Env): string {
   return env.DEFAULT_WEEKLY_START ?? FALLBACK_START;
 }
 
+/**
+ * Summary cache ŞEMA sürümü. SummaryResponse'a alan eklendiğinde/değiştiğinde ARTIR: KV'deki eski
+ * gövde (deploy öncesi ısıtılmış, DAILY_TTL'e kadar canlı) yeni sözleşmeyi karşılamaz → smoke
+ * `has("fxFlow")` türü kontroller ve UI eski şekli görür. Sürüm anahtara girer; eski anahtarlar
+ * TTL ile kendiliğinden düşer, cron yeni anahtarı ısıtır. (Faz 11 dersi: v1 → v2.)
+ */
+const SUMMARY_CACHE_SCHEMA = "v2";
+
 /** KV cache anahtarı — /api/weekly. */
 export function weeklyKey(start: string, end: string): string {
   return `weekly:${start}:${end}`;
 }
-/** KV cache anahtarı — /api/summary (UI'nin düştüğü anahtar). */
+/** KV cache anahtarı — /api/summary (UI'nin düştüğü anahtar; şema sürümlü). */
 export function summaryKey(start: string, end: string): string {
-  return `summary:${start}:${end}`;
+  return `summary:${SUMMARY_CACHE_SCHEMA}:${start}:${end}`;
 }
 
 /**
@@ -149,7 +157,7 @@ export function weeklyLastKey(start: string): string {
   return `weekly:last:${start}`;
 }
 export function summaryLastKey(start: string): string {
-  return `summary:last:${start}`;
+  return `summary:${SUMMARY_CACHE_SCHEMA}:last:${start}`;
 }
 
 function weeklyTtl(env: Env): number {

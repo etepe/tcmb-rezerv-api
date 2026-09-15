@@ -230,8 +230,10 @@ geriye dönük yeniden çıpalarız; analist yayım-takvimi gecikmesiyle bir ön
   tooltip kırılım: Δnet / altın / kamu / revizyon) "Net döviz alımı / satımı" paneli olarak EN ÜSTE; brüt
   değişim panelleri korunur ama "diğer" etiketi "yükümlülük + parite" diye düzeltildi (döviz alımı değildir);
   aside "Net döviz alımı · günlük" kartı (hafta/ay içi toplam); `SwapTrendChart` tam tarihçe.
-  **Deploy sonrası kontrol:** `meta.goldPriceSource` "evds:altinpiyasa" olmalı; "external:yahoo-gcf" ise EVDS
-  seri kodu yanlış → `GOLD_EVDS_CODE` var'ını EVDS'ten doğrulanmış kodla güncelle (kod değişikliği gerekmez).
+  **Deploy sonrası kontrol (2026-09-15 · CANLI ✅):** `meta.goldPriceSource` = "evds:altinpiyasa" DOĞRULANDI
+  (seri kodu çalışıyor); canlı fxFlow 04→11.09: +1,39 / −1,51 / +0,71 / −0,32 / −0,81 (referans +1,33 / −1,51 /
+  +0,69 / −0,32 / −0,81). İlk deploy'da smoke, KV'deki deploy-öncesi (fxFlow'suz) 1 saatlik cache'i okuyup düştü →
+  `SUMMARY_CACHE_SCHEMA` ("v2") anahtara eklendi; **SummaryResponse'a alan eklenince sürümü ARTIR.**
 - Blocked by: yok. **Çekirdek dashboard + sertleştirme + Faz 5 swap + Faz 6 altın-fiyat + Faz 7 YDY menkul kıymet + Faz 8 haftalık + Faz 9 aylık rezerv değişimi (API+UI) + Faz 10 günlük mail (API) + Faz 11 net döviz alımı (API+UI) TAMAM.**
 
 ## Development Commands

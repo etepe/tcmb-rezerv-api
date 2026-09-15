@@ -444,7 +444,7 @@ test("/api/summary: EVDS bakımda (503) + son-bilinen-iyi var -> 200 stale", asy
     globalThis.fetch = mockFetch();
     const ok = await callSummary(env);
     assert.equal(ok.status, 200);
-    assert.ok([...store.keys()].some((k) => k.startsWith("summary:last:")), "last-good yazıldı");
+    assert.ok([...store.keys()].some((k) => k.startsWith("summary:") && k.includes(":last:")), "last-good yazıldı");
 
     // 2) EVDS bakıma girer; date-specific cache'i farklı end ile baypas et → build çağrılır.
     globalThis.fetch = mockFetchMaintenance();
