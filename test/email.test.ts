@@ -13,6 +13,7 @@ import { summaryKey, summaryLastKey, todayDdMmYyyy } from "../src/summary.ts";
 import type {
   EmailSender,
   EmailSendMessage,
+  FxFlowPoint,
   MonthlyFlowPoint,
   SummaryMeta,
   SummaryResponse,
@@ -27,6 +28,7 @@ const START = "01-10-2025";
 function makeSummary(overrides?: {
   weeklyFlow?: WeeklyFlowPoint[];
   monthlyFlow?: MonthlyFlowPoint[];
+  fxFlow?: FxFlowPoint[];
   meta?: Partial<SummaryMeta>;
 }): SummaryResponse {
   const meta: SummaryMeta = {
@@ -64,6 +66,11 @@ function makeSummary(overrides?: {
       { ay: "2026-07", tarih: "2026-07-31", prevTarih: "2026-06-26", delta: 4.3, goldPriceEffect: 2.1, otherPart: 2.2 },
       { ay: "2026-08", tarih: "2026-08-03", prevTarih: "2026-07-31", delta: 1.5, goldPriceEffect: 0.9, otherPart: 0.6, nowcast: true },
     ],
+    // Faz 11 — günlük net döviz alımı: 30→31 Tem (önceki hafta, Temmuz) +0.4; 31 Tem→03 Ağu (hafta içi, Ağustos) −0.8.
+    fxFlow: overrides?.fxFlow ?? [
+      { tarih: "2026-07-31", prevTarih: "2026-07-30", deltaNetHaric: 1.1, goldPriceEffect: 0.6, kamuDelta: 0.1, swapRevision: 0, fxFlow: 0.4 },
+      { tarih: "2026-08-03", prevTarih: "2026-07-31", deltaNetHaric: 0.3, goldPriceEffect: 0.9, kamuDelta: 0.2, swapRevision: 0, fxFlow: -0.8 },
+    ],
     meta,
   };
 }
@@ -93,7 +100,10 @@ test("email: EN mutlu yol — konu, seviye, haftalık+aylık satırlar, caveat, 
   assert.ok(text.includes("- Month-to-date (31 Jul -> 03 Aug, nowcast): +1.5 bn USD"), "devam eden ay satırı");
   assert.ok(text.includes("not pure intervention"), "caveat korunur");
   assert.ok(!text.includes("<"), "HTML işareti yok (düz metin)");
-  assert.ok(text.split("\n").length <= 14, "EN blok kısa (<= 14 satır)");
+  // Faz 11 — net döviz alımı satırları (son seans + hafta/ay içi toplam).
+  assert.ok(text.includes("- Last session (31 Jul -> 03 Aug): -0.8 bn USD"), "fx son seans satırı");
+  assert.ok(text.includes("- week-to-date -0.8 | month-to-date -0.8 bn USD"), "fx hafta/ay içi satırı");
+  assert.ok(text.split("\n").length <= 18, "EN blok kısa (<= 18 satır)");
 });
 
 test("email: gold-null (soft-fail) — yalnız delta + 'split unavailable', 'null' sızmaz", () => {
@@ -343,4 +353,21 @@ test("dispatch: binding yoksa EMAIL_CRON tetiği sessizce atlar (fırlatmaz)", a
   } finally {
     globalThis.fetch = original;
   }
+});
+
+test("email: fxFlow boş -> 'n/a'; null seans toplamdan düşer ve sayısı yazılır", () => {
+  const empty = buildReserveEmail(makeSummary({ fxFlow: [] }), { lang: "en", now: NOW }).text;
+  assert.ok(empty.includes("- Last session: n/a"), "fxFlow boşken n/a");
+  const withNull = buildReserveEmail(
+    makeSummary({
+      fxFlow: [
+        { tarih: "2026-07-31", prevTarih: "2026-07-30", deltaNetHaric: 1.1, goldPriceEffect: 0.6, kamuDelta: 0.1, swapRevision: 0, fxFlow: 0.4 },
+        { tarih: "2026-08-03", prevTarih: "2026-07-31", deltaNetHaric: 0.3, goldPriceEffect: null, kamuDelta: 0.2, swapRevision: 0, fxFlow: null },
+      ],
+    }),
+    { lang: "tr", now: NOW },
+  ).text;
+  assert.ok(withNull.includes("- Son seans (31 Tem -> 03 Ağu): veri yok"), "null son seans → veri yok");
+  assert.ok(withNull.includes("- hafta içi +0,0 (1 seans altın fiyatı yok, hariç)"), "null seans hariç + sayı");
+  assert.ok(!withNull.includes("null"), "asla 'null' yazılmaz");
 });

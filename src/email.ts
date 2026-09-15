@@ -1,6 +1,7 @@
 // M-006 email (Faz 10) — günlük rezerv-akışı maili (EN+TR, düz metin).
 // buildSummary'nin ürettiği weeklyFlow/monthlyFlow ayrıştırmasını (Δbrüt = altın fiyat
-// değerleme etkisi + "diğer") kısa ve profesyonel bir mail olarak kurar; Cloudflare
+// değerleme etkisi + "diğer") ve Faz 11 günlük net döviz alımını (fxFlow: son seans + hafta/ay
+// içi toplam) kısa ve profesyonel bir mail olarak kurar; Cloudflare
 // Email Service `send_email` binding'i ile kullanıcının doğrulanmış adresine gönderir
 // (doğrulanmış hedefe gönderim her planda ücretsizdir; API anahtarı/secret GEREKMEZ).
 // Gövde Bloomberg chat'e kopyala-yapıştır hedefiyle tasarlandı: satır-etiketli, tablo yok.
@@ -10,6 +11,7 @@
 import type {
   EmailLang,
   EmailSendMessage,
+  FxFlowPoint,
   MonthlyFlowPoint,
   SummaryResponse,
   WeeklyFlowPoint,
@@ -72,6 +74,11 @@ interface Strings {
   other: string;
   na: string;
   splitUnavailable: string;
+  fxHead: string;
+  fxLast: string;
+  fxWtd: string;
+  fxMtd: string;
+  fxMissing: (n: number) => string;
   stale: (date: string) => string;
   note: string;
 }
@@ -94,10 +101,15 @@ const STRINGS: Record<Lang, Strings> = {
     other: "other",
     na: "n/a",
     splitUnavailable: "(gold/other split unavailable)",
+    fxHead: "Net FX purchases (ex gold-price effect, ex Treasury FX deposits, ex swaps):",
+    fxLast: "Last session",
+    fxWtd: "week-to-date",
+    fxMtd: "month-to-date",
+    fxMissing: (n) => ` (${n} session${n === 1 ? "" : "s"} without gold price, excluded)`,
     stale: (date) =>
       `Warning: source data currently unreachable; figures are from the last successful update (${date}).`,
     note:
-      'Note: "other" = FX flows + parity effects (not pure intervention); gold is valuation-only. Source: TCMB EVDS; nowcast calculated in-house.',
+      'Note: "other" = FX flows + parity effects (not pure intervention); gold is valuation-only. Net FX purchases = change in net foreign assets ex-swap minus gold-price effect and Treasury FX-deposit moves (includes gold quantity and parity). Source: TCMB EVDS; nowcast calculated in-house.',
   },
   tr: {
     title: "TCMB Brüt Rezervler",
@@ -116,10 +128,15 @@ const STRINGS: Record<Lang, Strings> = {
     other: "diğer",
     na: "veri yok",
     splitUnavailable: "(altın/diğer ayrıştırması yok)",
+    fxHead: "Net döviz alımı (altın fiyat etkisi, Hazine döviz mevduatı ve swap hariç):",
+    fxLast: "Son seans",
+    fxWtd: "hafta içi",
+    fxMtd: "ay içi",
+    fxMissing: (n) => ` (${n} seans altın fiyatı yok, hariç)`,
     stale: (date) =>
       `Uyarı: kaynak veriye şu an ulaşılamıyor; rakamlar son başarılı güncellemeye aittir (${date}).`,
     note:
-      'Not: "diğer" = döviz akışları + parite etkileri (saf müdahale değildir); altın yalnız fiyat değerlemesidir. Kaynak: TCMB EVDS; nowcast kurum içi hesaplamadır.',
+      'Not: "diğer" = döviz akışları + parite etkileri (saf müdahale değildir); altın yalnız fiyat değerlemesidir. Net döviz alımı = swap hariç net dış varlık değişimi − altın fiyat etkisi − Hazine döviz mevduatı hareketi (altın miktarı ve pariteyi içerir). Kaynak: TCMB EVDS; nowcast kurum içi hesaplamadır.',
   },
 };
 
@@ -156,7 +173,38 @@ function flowLine(label: string, p: FlowPoint | undefined, s: Strings, lang: Lan
   return `- ${label} (${range}): ${delta} | ${s.gold} ${fmtSigned(p.goldPriceEffect, lang)} | ${s.other} ${fmtSigned(p.otherPart, lang)}`;
 }
 
-/** Tek dil bloğu (~13 satır): başlık, seviye, haftalık + aylık ayrıştırma, caveat. */
+/** fxFlow toplamı (null'lar hariç) + kaç noktanın null olduğu. */
+function fxSum(points: FxFlowPoint[]): { sum: number; missing: number } {
+  let sum = 0;
+  let missing = 0;
+  for (const p of points) {
+    if (p.fxFlow === null) missing++;
+    else sum += p.fxFlow;
+  }
+  return { sum, missing };
+}
+
+/**
+ * Net döviz alımı satırları (Faz 11): son seans + hafta içi (çıpa Cuma'dan sonraki seanslar) + ay içi
+ * (son noktanın ayındaki seanslar). fxFlow boşsa yalnız "n/a"; null seanslar toplamdan düşer ve sayısı yazılır.
+ */
+function fxLines(summary: SummaryResponse, s: Strings, lang: Lang): string[] {
+  const fx = summary.fxFlow ?? [];
+  const last = fx[fx.length - 1];
+  if (!last) return [`- ${s.fxLast}: ${s.na}`];
+  const range = `${fmtDate(last.prevTarih, lang)} -> ${fmtDate(last.tarih, lang)}`;
+  const lastStr = last.fxFlow === null ? s.na : `${fmtSigned(last.fxFlow, lang)} ${s.unit}`;
+  const wtd = fxSum(fx.filter((p) => p.tarih > summary.meta.anchorDate));
+  const mtd = fxSum(fx.filter((p) => p.tarih.slice(0, 7) === last.tarih.slice(0, 7)));
+  const wtdStr = `${fmtSigned(wtd.sum, lang)}${wtd.missing ? s.fxMissing(wtd.missing) : ""}`;
+  const mtdStr = `${fmtSigned(mtd.sum, lang)}${mtd.missing ? s.fxMissing(mtd.missing) : ""}`;
+  return [
+    `- ${s.fxLast} (${range}): ${lastStr}`,
+    `- ${s.fxWtd} ${wtdStr} | ${s.fxMtd} ${mtdStr} ${s.unit}`,
+  ];
+}
+
+/** Tek dil bloğu (~17 satır): başlık, seviye, haftalık + aylık ayrıştırma, net döviz alımı, caveat. */
 function renderBlock(summary: SummaryResponse, lang: Lang, reportDate: string): string {
   const s = STRINGS[lang];
   const lines: string[] = [];
@@ -186,6 +234,9 @@ function renderBlock(summary: SummaryResponse, lang: Lang, reportDate: string): 
   lines.push(s.monthlyHead);
   lines.push(flowLine(s.monthlyCompleted, lastCompleted(summary.monthlyFlow), s, lang, false));
   lines.push(flowLine(s.monthlyOngoing, ongoingPoint(summary.monthlyFlow), s, lang, true));
+  lines.push("");
+  lines.push(s.fxHead);
+  lines.push(...fxLines(summary, s, lang));
   lines.push("");
   lines.push(s.note);
   return lines.join("\n");

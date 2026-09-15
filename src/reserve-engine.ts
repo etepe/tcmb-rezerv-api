@@ -1,6 +1,7 @@
 // M-002 reserve-engine — saf, yan etkisiz hesap fonksiyonları.
 // Faz 1: `computeWeekly` (+ `weeklyMeta`). Faz 2: + `computeDailyNowcast` (nowcast + NIR).
 // Faz 3: + `computeDolarizasyon` (haftalık YP mevduat → DolarPoint[]).
+// Faz 11: + `computeFxFlow` (günlük net döviz alımı/satımı; swap hariç net tabanlı) + SwapPoint.kamu.
 // Kaynak mantık: tcmb_reserves.py `fetch_weekly` / `fetch_daily_nowcast` normalize adımları.
 // >>> Formülleri "iyileştirme"; tcmb_reserves.py'de doğrulandı, birebir port. <<<
 
@@ -9,6 +10,7 @@ import type {
   DailyPoint,
   DolarPoint,
   ForeignSecPoint,
+  FxFlowPoint,
   MonthlyFlowPoint,
   RawRow,
   SwapPoint,
@@ -492,12 +494,16 @@ export function computeSwapSplit(
     const iso = isoDate(r.tarih);
     const sw = swapByDate.get(iso);
     if (!sw || (sw.alim === null && sw.satim === null)) continue; // swap verisi yok -> uydurma
+    const a10 = num(r, K_A10);
     const a11 = num(r, K_A11);
     const a14 = num(r, K_A14);
     const netDahil = (a02 - (a11 ?? 0) - (a14 ?? 0)) / usd / 1e6;
     const yerliBanka = ((sw.alim ?? 0) - (sw.satim ?? 0)) / 1000;
     const yabanciMb = mbFor(iso);
     const toplamSwap = yabanciMb + yerliBanka;
+    // Kamu/diğer YP mevduatı (A13 = A10 − A11 − A14; analitik bilanço P.1 = P.1a + P.1ba + P.1bb).
+    // A10 yoksa null (NIR deseni; uydurma 0 yazılmaz).
+    const kamu = a10 === null || a10 === 0 ? null : (a10 - (a11 ?? 0) - (a14 ?? 0)) / usd / 1e6;
     points.push({
       tarih: iso,
       netDahil,
@@ -505,6 +511,7 @@ export function computeSwapSplit(
       yerliBanka,
       toplamSwap,
       netHaric: netDahil - toplamSwap,
+      kamu,
     });
   }
   points.sort((a, b) => a.tarih.localeCompare(b.tarih));
@@ -515,6 +522,86 @@ export function computeSwapSplit(
     mbSource: hasMb ? "evds:K18" : "fallback",
     mb: last ? last.yabanciMb : fallbackMb,
   };
+}
+
+/**
+ * Günlük NET DÖVİZ ALIMI / SATIMI tahmini (Faz 11 — saf, yan etkisiz, no-throw).
+ * Analist tablolarının standart tanımı (altın FİYAT etkisi hariç net alım): swap hariç net dış
+ * varlığın günlük değişiminden TCMB'nin piyasa işlemi OLMAYAN kalemler ayıklanır.
+ *
+ *   deltaNetHaric_n   = netHaric_n − netHaric_{n-1}
+ *   goldPriceEffect_n = altin(F) × (fiyat_n − fiyat_{n-1}) / fiyat(F)      # Laspeyres; Q = altin(F)/fiyat(F)
+ *                        (F = prevTarih'e eşit/önceki en yakın resmi Cuma → ima edilen ons o haftaya ait;
+ *                         computeGoldPriceEffect'in oran-bazlı yönteminin günlük FARK biçimi — yeni formül değil)
+ *   kamuDelta_n       = kamu_n − kamu_{n-1}                                # Hazine döviz hesabı (A13) hareketi
+ *   swapRevision_n    = −(yabanciMb_n − yabanciMb_{n-1})                   # aylık K18 adımı: bilgi, işlem değil
+ *   fxFlow_n          = deltaNetHaric_n − goldPriceEffect_n − kamuDelta_n − swapRevision_n
+ *                     ≡ ΔnetDahil − ΔyerliBanka − Γ − ΔKamu
+ *
+ * Neden Δbrüt değil: brüt rezerv bankaların TCMB'deki döviz mevduatı (A14) ve dış yükümlülük (A11)
+ * hareketleriyle de değişir (banka döviz yatırır → brüt artar, net değişmez); yerli banka swapı da
+ * brüt/netDahil'i oynatır ama alım değildir. Bu yüzden akım tabanı swap hariç NET'tir.
+ *
+ * - Her iki günün altın fiyatı da harita'da BİREBİR (tarih eşleşmeli) olmalı; yoksa gold + fxFlow null
+ *   (tatil/yayım gecikmesinde sıfır uydurulmaz — taşınan fiyat sahte akım üretir).
+ * - kamu (A10) iki günden birinde yoksa kamuDelta + fxFlow null.
+ * - Ardışık MEVCUT swap noktaları eşlenir (atlanan gün varsa akım o güne yığılır). < 2 nokta → [].
+ * - fxFlow altın MİKTAR hareketini ve döviz paritesini içerir (caveat UI/mail'de korunur).
+ */
+export function computeFxFlow(
+  swap: SwapPoint[],
+  weekly: WeeklyPoint[],
+  goldUsdByDate: Map<string, number>,
+): FxFlowPoint[] {
+  const sortedWeekly = [...weekly].sort((a, b) => a.tarih.localeCompare(b.tarih));
+  const sortedSwap = [...swap].sort((a, b) => a.tarih.localeCompare(b.tarih));
+  const sortedGold = [...goldUsdByDate.keys()].sort();
+
+  // `iso`'ya eşit/önceki en yakın resmi Cuma (ima edilen ons tabanı); yoksa en erken hafta.
+  const anchorFor = (iso: string): WeeklyPoint | undefined => {
+    let chosen: WeeklyPoint | undefined;
+    for (const w of sortedWeekly) {
+      if (w.tarih <= iso) chosen = w;
+      else break;
+    }
+    return chosen ?? sortedWeekly[0];
+  };
+
+  const out: FxFlowPoint[] = [];
+  for (let i = 1; i < sortedSwap.length; i++) {
+    const prev = sortedSwap[i - 1]!;
+    const cur = sortedSwap[i]!;
+    const deltaNetHaric = cur.netHaric - prev.netHaric;
+    const swapRevision = prev.yabanciMb - cur.yabanciMb; // −ΔyabanciMb (prev−cur → −0 üretmez)
+    const kamuDelta = prev.kamu === null || cur.kamu === null ? null : cur.kamu - prev.kamu;
+
+    let goldPriceEffect: number | null = null;
+    const pPrev = goldUsdByDate.get(prev.tarih);
+    const pCur = goldUsdByDate.get(cur.tarih);
+    const anchor = anchorFor(prev.tarih);
+    if (pPrev !== undefined && pCur !== undefined && anchor && anchor.altin > 0) {
+      const pAnchor = priceOnOrBefore(sortedGold, goldUsdByDate, anchor.tarih);
+      if (pAnchor !== null && pAnchor > 0) {
+        goldPriceEffect = anchor.altin * (pCur - pPrev) / pAnchor;
+      }
+    }
+
+    const fxFlow =
+      goldPriceEffect === null || kamuDelta === null
+        ? null
+        : deltaNetHaric - goldPriceEffect - kamuDelta - swapRevision;
+
+    out.push({
+      tarih: cur.tarih,
+      prevTarih: prev.tarih,
+      deltaNetHaric,
+      goldPriceEffect,
+      kamuDelta,
+      swapRevision,
+      fxFlow,
+    });
+  }
+  return out;
 }
 
 /**

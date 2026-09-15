@@ -136,6 +136,12 @@ export interface SwapPoint {
   toplamSwap: number;
   /** Net dış varlık (swap hariç) = netDahil − toplamSwap. */
   netHaric: number;
+  /**
+   * Kamu ve diğer YP mevduatı (analitik bilanço P.1ba = A13) — (A10 − A11 − A14)/USD/1e6, milyar USD
+   * (Faz 11). Hazine'nin TCMB'deki döviz hesabı; seviyeden DÜŞÜLMEZ (netDahil ≡ NIR + A13), akımdan
+   * düşülür (`FxFlowPoint.kamuDelta`). A10 yoksa `null`.
+   */
+  kamu: number | null;
 }
 
 /** /api/summary yanıt meta'sı (C-001). Faz 2: haftalık + günlük çıpa bağlamı. */
@@ -159,11 +165,14 @@ export interface SummaryMeta {
   /** En güncel swap noktasında kullanılan Yabancı MB değeri (milyar USD, Faz 5). */
   swapMb: number;
   /**
-   * Altın-fiyat etkisi kaynağı (Faz 6). EVDS'te temiz günlük uluslararası altın fiyatı
-   * olmadığından HARİCİ (EVDS-dışı) bir seri kullanılır; çekilemezse `unavailable`
-   * (daily[].goldPriceEffect tümü null) → çekirdek nowcast etkilenmez.
+   * Altın-fiyat etkisi kaynağı (Faz 6 / Faz 11).
+   *   - `evds:altinpiyasa`  : TCMB EVDS BİST Kıymetli Madenler USD/ons ağırlıklı ortalama (iş günü,
+   *                            İstanbul seansı; TCMB değerleme referansıyla aynı gün) — TERCİH.
+   *   - `external:yahoo-gcf`: Yahoo GC=F vadeli kapanışı (NY; ~6 sa gecikme + ABD tatilleri) — yalnız
+   *                            EVDS altın serisi çekilemezse/boşsa FALLBACK.
+   *   - `unavailable`       : ikisi de yok → daily[].goldPriceEffect tümü null; çekirdek nowcast düşmez.
    */
-  goldPriceSource: "external:yahoo-gcf" | "unavailable";
+  goldPriceSource: "evds:altinpiyasa" | "external:yahoo-gcf" | "unavailable";
   /** Bu yanıt KV cache'ten mi geldi. */
   cached: boolean;
   /**
@@ -254,11 +263,50 @@ export interface MonthlyFlowPoint {
 }
 
 /**
+ * Günlük NET DÖVİZ ALIMI / SATIMI tahmini (Faz 11). Analist tablolarının standart tanımı
+ * ("altın fiyat etkisi hariç net alım", N^fp): swap hariç net dış varlığın günlük değişiminden
+ * TCMB'nin piyasa işlemi OLMAYAN kalemler ayıklanır. Hepsi milyar USD; `tarih` = dönem SONU
+ * (prevTarih → tarih kapanışı; analist tabloları çoğunlukla dönem BAŞI etiketler — bir gün kaydırın).
+ *
+ *   deltaNetHaric   = netHaric_n − netHaric_{n-1}                     (ham Δ swap hariç net)
+ *   goldPriceEffect = altin(F)/fiyat(F) × (fiyat_n − fiyat_{n-1})     (Laspeyres; F = prevTarih'e en
+ *                                                                      yakın önceki resmi Cuma = ima edilen ons)
+ *   kamuDelta       = kamu_n − kamu_{n-1}                              (Hazine döviz hesabı hareketi, A13)
+ *   swapRevision    = −(yabanciMb_n − yabanciMb_{n-1})                 (Yabancı MB bacağı aylık adımı —
+ *                                                                      işlem değil, geç gelen bilgi)
+ *   fxFlow          = deltaNetHaric − goldPriceEffect − kamuDelta − swapRevision
+ *                   ≡ ΔnetDahil − ΔyerliBanka − Γ − ΔKamu
+ *
+ * Kimlik: deltaNetHaric = fxFlow + goldPriceEffect + kamuDelta + swapRevision (tanım gereği kapanır).
+ * fxFlow altın MİKTAR hareketini (TCMB altın alım/satımı) ve döviz paritesini İÇERİR (piyasa
+ * tablolarıyla aynı konvansiyon; günlük ons verisi EVDS'te yok). Her iki günün altın fiyatı
+ * yoksa (tatil/yayım gecikmesi) gold ve fxFlow `null` — SIFIR YAZILMAZ. Doğrulama: bağımsız
+ * analist serisiyle 5/5 gün ≤0,07 mlr (2026-09-04..11).
+ */
+export interface FxFlowPoint {
+  /** Dönem sonu (ISO `yyyy-mm-dd`) — bar bu güne etiketlenir. */
+  tarih: string;
+  /** Dönem başı (ISO) — bir önceki mevcut iş günü. */
+  prevTarih: string;
+  /** Δ swap hariç net dış varlık (ham; netHaric_n − netHaric_{n-1}). */
+  deltaNetHaric: number;
+  /** Altın FİYAT değerleme etkisi (Laspeyres, ima edilen ons); fiyat yoksa null. */
+  goldPriceEffect: number | null;
+  /** Kamu (Hazine) YP mevduatı hareketi (A13); A10 yoksa null. */
+  kamuDelta: number | null;
+  /** Yabancı MB swap çapa revizyonu (−ΔyabanciMb); 0 dışında yalnız ay adımında. */
+  swapRevision: number;
+  /** Net döviz alımı(+)/satımı(−) tahmini; gold ya da kamu null ise null. */
+  fxFlow: number | null;
+}
+
+/**
  * GET /api/summary yanıt gövdesi (C-001).
  * Faz 3: + `dolarizasyon` (haftalık YP mevduat). Faz 5: + `swap` (günlük swap ayrıştırması).
  * Faz 7: + `foreignSecurities` (haftalık yurt dışı yerleşik menkul kıymet akım+stok).
  * Faz 8: + `weeklyFlow` (haftalık rezerv değişimi: altın fiyat etkisi vs diğer + nowcast son sütun).
  * Faz 9: + `monthlyFlow` (aylık rezerv değişimi; weeklyFlow'un aylık analoğu + nowcast son sütun).
+ * Faz 11: + `fxFlow` (günlük net döviz alımı/satımı tahmini; `swap` artık [start,end] tam aralık).
  * Hepsi EVDS'ten çekilemezse soft-fail ile boş dizi döner (çekirdek haftalık/günlük dashboard düşmez).
  */
 export interface SummaryResponse {
@@ -269,6 +317,7 @@ export interface SummaryResponse {
   foreignSecurities: ForeignSecPoint[];
   weeklyFlow: WeeklyFlowPoint[];
   monthlyFlow: MonthlyFlowPoint[];
+  fxFlow: FxFlowPoint[];
   meta: SummaryMeta;
 }
 
