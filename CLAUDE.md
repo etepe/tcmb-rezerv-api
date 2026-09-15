@@ -56,6 +56,9 @@ CSS değişkeni olarak tanımla, hardcode etme:
 | YDY menkul kıymet (Faz 7) hisse stok/net | `TP.MKNETHAR.M1` / `.M7` | Haftalık (Cuma) | milyon USD |
 | YDY menkul kıymet DİBS stok/net | `TP.MKNETHAR.M2` / `.M8` | Haftalık (Cuma) | milyon USD |
 | YDY menkul kıymet ÖST stok/net | `TP.MKNETHAR.M6` / `.M12` | Haftalık (Cuma) | milyon USD |
+| Altın fiyatı USD/ons (Faz 11; BİST Kıymetli Madenler ağırlıklı ort.) | `TP.ALTINPIYASA.AGORT03` (env `GOLD_EVDS_CODE`) | İş günü | USD/ons |
+| Swap stoku alım/satım yönlü (Faz 5) | `TP.SWAPTEKTAR.TOTALSTOKALIMYONLU` / `…SATIMYONLU` | İş günü | milyon USD |
+| Yabancı MB swap (Faz 5) | `TP.DOVVARNC.K18` | Aylık | milyon USD |
 
 **Hesaplama (hepsi milyar USD çıktı):**
 ```
@@ -83,9 +86,26 @@ ypToplam = TP.HPBITABLO4.1/1000 ;  ypYurtici = TP.HPBITABLO4.2/1000
 #   SummaryResponse.swap: SwapPoint[]; meta.swapMbSource ("evds:K18"|"fallback") + meta.swapMb. Soft-fail ([]).
 #   [UI (tqrlab.com) Faz 5'te TAMAM: manuel ?swap= girdisi KALDIRILDI → UI API'nin swap'ını tüketir. Caveat korunur:
 #    "swap hariç net rezerv" kanonik değil → üçüncü taraf rakamına birebir oturmayabilir.]
+
+# GÜNLÜK NET DÖVİZ ALIMI / SATIMI — Faz 11 (/api/summary.fxFlow, computeFxFlow). Analist tablosu standart tanımı.
+#   >>> Δbrüt − altın fiyat etkisi ("diğer") DÖVİZ ALIMI DEĞİLDİR: brüt, bankaların TCMB'deki döviz mevduatı (A14),
+#       dış yükümlülük (A11) ve yerli banka swapıyla da oynar. Akım tabanı SWAP HARİÇ NET dış varlıktır. <<<
+#   kamu(t)          = (A10 − A11 − A14)/USD/1e6            # Hazine döviz hesabı (A13); SwapPoint.kamu
+#   deltaNetHaric    = netHaric_n − netHaric_{n-1}
+#   goldPriceEffect  = altin(F) × (P_n − P_{n-1}) / P(F)     # Laspeyres; F = prev'e en yakın önceki resmi Cuma (ima edilen ons)
+#   kamuDelta        = kamu_n − kamu_{n-1} ;  swapRevision = −(yabanciMb_n − yabanciMb_{n-1})   # K18 ay adımı: işlem değil
+#   fxFlow           = deltaNetHaric − goldPriceEffect − kamuDelta − swapRevision  (≡ ΔnetDahil − ΔyerliBanka − Γ − ΔKamu)
+#   Altın fiyatı P: EVDS TP.ALTINPIYASA.AGORT03 (İstanbul seansı, TCMB değerleme günüyle hizalı) → yoksa Yahoo GC=F fallback.
+#   İki günün fiyatı BİREBİR yoksa gold/fxFlow null (taşınan fiyat sahte akım üretir; sıfır uydurulmaz).
+#   Etiket: `tarih` = dönem SONU (prev→tarih). Analist tabloları çoğunlukla dönem BAŞI etiketler (1 gün kaydır).
+#   Doğrulama (2026-09-04..11, bağımsız analist günlük serisi): 5/5 gün ≤0,07 mlr (10→11.09: −0,81 vs −0,81).
 ```
 **Doğrulama referansı (kabul testi):** çıpa 12-06-2026 toplam=152.08; nowcast 17/18/19-06 = 164.2 / 159.4 / 157.1.
 Baz 27-02-2026 = toplam 210.3 / altın 136.8 / döviz 73.4.
+**Faz 11 çapraz kontrol (2026-09-11, bağımsız analist sitesi):** brüt 178,71 ✓ · net dış varlık 64,15 ✓ · yerli banka
+swap −4,27 ✓ · swap hariç 52,08 vs 51,84 (fark yalnız Yabancı MB kaynağı: K18 aylık 16,34 vs IRFCL haftalık 16,58) ·
+net döviz alımı 10→11.09 −0,81 ✓. Not: çıpadan önceki 1-2 günde brüt ±0,4 fark normaldir (biz son resmi Cuma'ya
+geriye dönük yeniden çıpalarız; analist yayım-takvimi gecikmesiyle bir önceki Cuma'yı kullanır).
 
 ## Deployment (kilitli kararlar — 2026-06-22)
 - **UI:** tqrlab.com Astro repo'suna **yeni route** `/tcmb-rezerv-takip` (`/yz-model-takip` deseni). Standalone repo değil.
@@ -95,8 +115,16 @@ Baz 27-02-2026 = toplam 210.3 / altın 136.8 / döviz 73.4.
 - **Erişim:** sayfa **public** (Cloudflare Access gating yok).
 
 ## Current Status
+- Phase **11** (2026-09-15 · kontrol + düzeltme): "Rezerv ve döviz satış rakamları" bağımsız analist sitesiyle
+  karşılaştırıldı. SEVİYELER birebir tutuyor (brüt/net dış varlık/yerli swap). GÜNLÜK DÖVİZ AKIŞI iki sebeple
+  yanlıştı: (1) altın fiyatı Yahoo GC=F NY kapanışı (İstanbul seansından ~6 sa sonra, ABD tatili boş) → günlük
+  altın etkisinin işareti bile tersti (10→11.09: +1,1 vs −1,25) ve "diğer" bunu ters işaretle yutuyordu;
+  (2) "diğer" = Δbrüt − altın: brüt, banka döviz mevduatı/dış yükümlülük/yerli swap ile de oynar → alım-satım
+  değil. Düzeltme: altın fiyatı EVDS `TP.ALTINPIYASA.AGORT03` (Yahoo fallback), yeni `fxFlow` (swap hariç net
+  tabanlı, Γ + Hazine A13 + K18 revizyonu ayıklanır), `swap[]` tam aralık, `SwapPoint.kamu`, mail "Net döviz
+  alımı" satırları, UI `FxFlowBars` + aside kartı. Referansla 5/5 gün ≤0,07. API ✅ · UI ✅.
 - Phase **6**: günlük altın-fiyat değerleme etkisi ayrıştırması (API) → "Rezerv akışı" barlarını altın
-  fiyat etkisi vs diğer (döviz akışı + parite) olarak böler. API ✅ TAMAM; UI sürüyor.
+  fiyat etkisi vs diğer (döviz akışı + parite) olarak böler. API ✅ TAMAM; UI ✅.
 - Phase **5**: otomatik swap ayrıştırması (API) + UI redesign (main+aside, otomatik swap, yeni grafikler) — ✅ TAMAM.
   Faz 4: Cron ön-ısıtma (sertleştirme) + light-tema paylaşım/PDF varyantı.
   API: `tcmb-rezerv-api.tepe-erdinc.workers.dev` · UI: `tqrlab.com/tcmb-rezerv-takip`. Faz 1-3 ✅ **CANLI**.
@@ -191,7 +219,20 @@ Baz 27-02-2026 = toplam 210.3 / altın 136.8 / döviz 73.4.
   Tek-seferlik kurulum (dashboard): tqrlab.com Email Routing + hedef adres doğrulama
   — doğrulama DEPLOY'dan önce. typecheck ✅ · 47/47 test ✅ (builder EN/TR/both + gold-null + stale +
   dispatch + warm-cron regresyonu) · dry-run ✅.
-- Blocked by: yok. **Çekirdek dashboard + sertleştirme + Faz 5 swap + Faz 6 altın-fiyat + Faz 7 YDY menkul kıymet + Faz 8 haftalık + Faz 9 aylık rezerv değişimi (API+UI) + Faz 10 günlük mail (API) TAMAM.**
+- Tamamlanan (Faz 11 — API + UI): günlük NET DÖVİZ ALIMI/SATIMI. API: `FxFlowPoint` (tarih/prevTarih/
+  deltaNetHaric/goldPriceEffect/kamuDelta/swapRevision/fxFlow) + `SummaryResponse.fxFlow`; `computeFxFlow` (saf,
+  no-throw; formül yukarıda); `computeSwapSplit` → `SwapPoint.kamu` (A13); günlük A02/A10/A11/A14/USD ve SWAPTEKTAR
+  artık **[start,end]** (swap/fxFlow tarihçesi; nowcast `daily` yine [çıpa,end] — sözleşme korunur); altın fiyatı
+  **EVDS** `GOLD_EVDS_CODE` (varsayılan `TP.ALTINPIYASA.AGORT03`) → boş/hatalıysa Yahoo GC=F fallback →
+  `meta.goldPriceSource` = "evds:altinpiyasa" | "external:yahoo-gcf" | "unavailable". Mail (M-006): "Net döviz alımı"
+  bloğu (son seans + hafta/ay içi; null seans hariç + sayısı). CI smoke `fxFlow` + `goldPriceSource` sözleşmesi.
+  typecheck ✅ · 54/54 test ✅ · dry-run ✅. UI (`Research_publishing_v0`): `FxFlowBars` (son 30 seans, işaret-renk,
+  tooltip kırılım: Δnet / altın / kamu / revizyon) "Net döviz alımı / satımı" paneli olarak EN ÜSTE; brüt
+  değişim panelleri korunur ama "diğer" etiketi "yükümlülük + parite" diye düzeltildi (döviz alımı değildir);
+  aside "Net döviz alımı · günlük" kartı (hafta/ay içi toplam); `SwapTrendChart` tam tarihçe.
+  **Deploy sonrası kontrol:** `meta.goldPriceSource` "evds:altinpiyasa" olmalı; "external:yahoo-gcf" ise EVDS
+  seri kodu yanlış → `GOLD_EVDS_CODE` var'ını EVDS'ten doğrulanmış kodla güncelle (kod değişikliği gerekmez).
+- Blocked by: yok. **Çekirdek dashboard + sertleştirme + Faz 5 swap + Faz 6 altın-fiyat + Faz 7 YDY menkul kıymet + Faz 8 haftalık + Faz 9 aylık rezerv değişimi (API+UI) + Faz 10 günlük mail (API) + Faz 11 net döviz alımı (API+UI) TAMAM.**
 
 ## Development Commands
 ```
@@ -215,10 +256,10 @@ pnpm build && wrangler pages deploy dist  # ya da mevcut Pages projesine route
 | Module | Path | Status | Agent |
 |---|---|---|---|
 | M-001 evds-client | `src/evds-client.ts` | ✅ Faz 1-3 (haftalık + günlük + YP mevduat; generic) | sonnet |
-| M-001b gold-client | `src/gold-client.ts` | ✅ Faz 6 (HARİCİ altın fiyatı — Yahoo GC=F; EVDS-only'a dar istisna, soft-fail) | opus |
-| M-002 reserve-engine | `src/reserve-engine.ts` | ✅ Faz 1-9 (`computeWeekly`/`weeklyMeta`/`computeDailyNowcast`/`computeDolarizasyon`/`computeSwapSplit`/`computeGoldPriceEffect`/`computeForeignSecurities`/`computeWeeklyFlow`/`computeMonthlyFlow`) | opus |
-| M-003 api-worker | `src/index.ts` (+ `src/summary.ts`) | ✅ Faz 1-8 (`/api/weekly` + `/api/summary` [+ `dolarizasyon`/`swap`/`goldPriceEffect`/`foreignSecurities`/`weeklyFlow` soft-fail]; fetch+compute+cache `summary.ts`'te, HTTP+cron paylaşır) | sonnet |
-| M-004 dashboard-ui | tqrlab.com repo: `src/components/reserve/*` (`ReserveDashboard`/`AreaChart`/`MetricCards`/`Dolarizasyon`/`SwapCard` + Faz 5: `AsideMetricCard`/`ReserveChangeBars`/`NirChart`/`SwapTrendChart`/`utils`) | ✅ Faz 1-5 (CANLI; light-tema paylaşım/PDF; Faz 5 redesign: main+aside, otomatik swap, yeni grafikler) | sonnet |
+| M-001b gold-client | `src/gold-client.ts` | ✅ Faz 6/11 (altın fiyatı: EVDS `TP.ALTINPIYASA.AGORT03` satır→harita (saf) TERCİH; Yahoo GC=F yalnız FALLBACK — EVDS-only'a dar istisna, soft-fail) | opus |
+| M-002 reserve-engine | `src/reserve-engine.ts` | ✅ Faz 1-11 (`computeWeekly`/`weeklyMeta`/`computeDailyNowcast`/`computeDolarizasyon`/`computeSwapSplit`(+kamu)/`computeGoldPriceEffect`/`computeForeignSecurities`/`computeWeeklyFlow`/`computeMonthlyFlow`/`computeFxFlow`) | opus |
+| M-003 api-worker | `src/index.ts` (+ `src/summary.ts`) | ✅ Faz 1-11 (`/api/weekly` + `/api/summary` [+ `dolarizasyon`/`swap`/`goldPriceEffect`/`foreignSecurities`/`weeklyFlow`/`monthlyFlow`/`fxFlow` soft-fail]; fetch+compute+cache `summary.ts`'te, HTTP+cron paylaşır) | sonnet |
+| M-004 dashboard-ui | tqrlab.com repo: `src/components/reserve/*` (`ReserveDashboard`/`AreaChart`/`MetricCards`/`Dolarizasyon`/`SwapCard` + Faz 5: `AsideMetricCard`/`ReserveChangeBars`/`NirChart`/`SwapTrendChart`/`utils` + Faz 11: `FxFlowBars`) | ✅ Faz 1-11 (CANLI; light-tema paylaşım/PDF; Faz 5 redesign: main+aside, otomatik swap, yeni grafikler; Faz 11 net döviz alımı) | sonnet |
 | M-005 scheduled-refresh | `src/scheduled.ts` | ✅ Faz 4 — cron KV ön-ısıtma (`warmCache` → `summary`+`weekly`; `[triggers]` wrangler.toml) | haiku |
 | M-006 email | `src/email.ts` | ✅ Faz 10 — günlük rezerv-akışı maili (EN+TR düz metin; `send_email` binding; `EMAIL_CRON` 08:30+15:30 TRT; soft-fail/stale destekli) | sonnet |
 
@@ -236,7 +277,11 @@ pnpm build && wrangler pages deploy dist  # ya da mevcut Pages projesine route
 - ❌ Eski `/service/evds` ucunu kullanma (ölü — SPA döner).
 - ❌ Nowcast/NIR formülünü "iyileştirme"/yeniden tasarlama — `tcmb_reserves.py`'de doğrulandı, birebir port et.
 - ❌ Günlük altın/döviz **seviye (stok) ayrımını uydurma** (günlük altın/döviz stok ayrımı EVDS'de yok; seviye ayrımı haftalık kalır).
-  ✓ Faz 6: günlük altın **fiyat-DEĞİŞİM etkisi** ayrı (harici altın fiyatı + haftalık C1, oran-bazlı; `computeGoldPriceEffect`) —
+  ✓ Faz 6: günlük altın **fiyat-DEĞİŞİM etkisi** ayrı (EVDS altın fiyatı + haftalık C1, oran-bazlı; `computeGoldPriceEffect`) —
   bu seviye ayrımı değil, değerleme etkisidir; "diğer" segmenti FX paritesini içerir (saf müdahale değil, caveat korunur).
+- ❌ "Δbrüt − altın fiyat etkisi"ni **döviz alımı/satışı** diye sunma (Faz 11 dersi): brüt, banka döviz mevduatı (A14),
+  dış yükümlülük (A11) ve yerli banka swapıyla da değişir. Döviz akışı için `fxFlow` (swap hariç net tabanlı) kullan.
+- ❌ Günlük altın etkisinde NY kapanışlı/ABD-takvimli fiyat (Yahoo GC=F) **birincil** kaynak olarak kullanma — TCMB değerleme
+  günüyle hizasız (işaret bile ters çıkabilir). EVDS İstanbul seansı serisi birincil; Yahoo yalnız fallback.
 - ❌ Fazın ötesine geçme. Faz 1 deploy edilip gözden geçirilmeden Faz 2 kodu yazma (BDUF yok).
 - ❌ Jenerik "admin template" görünümü. tqrlab token'ları + DM Sans/JetBrains Mono + sol-kenarlıklı kartlar şart.

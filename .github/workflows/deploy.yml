@@ -94,4 +94,8 @@ jobs:
           echo "$SUM" | jq -e '(.daily[-1].brutRezerv|type=="number") and (.daily[-1]|has("nir"))' >/dev/null
           # Faz 3 — dolarizasyon alanı sözleşmesi (soft-fail: varlık + tip; katı değer offline testte).
           echo "$SUM" | jq -e 'has("dolarizasyon") and (.dolarizasyon|type=="array")' >/dev/null
+          # Faz 11 — günlük net döviz alımı (fxFlow) sözleşmesi + altın fiyat kaynağı (EVDS tercih; Yahoo fallback kabul).
+          echo "$SUM" | jq -e 'has("fxFlow") and (.fxFlow|type=="array")' >/dev/null
+          echo "$SUM" | jq -e '.meta.goldPriceSource | IN("evds:altinpiyasa","external:yahoo-gcf","unavailable")' >/dev/null
+          echo "altın kaynağı: $(echo "$SUM" | jq -r .meta.goldPriceSource) · fxFlow nokta $(echo "$SUM" | jq -r '.fxFlow|length') · son fxFlow $(echo "$SUM" | jq -r '.fxFlow[-1].fxFlow')"
           echo "summary OK — çıpa $(echo "$SUM" | jq -r .meta.anchorDate), son brüt $(echo "$SUM" | jq -r .daily[-1].brutRezerv), dolarizasyon nokta $(echo "$SUM" | jq -r '.dolarizasyon|length')"

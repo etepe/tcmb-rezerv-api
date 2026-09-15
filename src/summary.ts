@@ -9,6 +9,7 @@ import type {
   DolarPoint,
   EmailSender,
   ForeignSecPoint,
+  FxFlowPoint,
   SummaryMeta,
   SummaryResponse,
   SwapPoint,
@@ -16,11 +17,12 @@ import type {
   WeeklyResponse,
 } from "./types.ts";
 import { fetchSeries } from "./evds-client.ts";
-import { fetchGoldUsdByDate } from "./gold-client.ts";
+import { DEFAULT_GOLD_EVDS_CODE, fetchGoldUsdByDate, goldUsdByDateFromRows } from "./gold-client.ts";
 import {
   computeDailyNowcast,
   computeDolarizasyon,
   computeForeignSecurities,
+  computeFxFlow,
   computeGoldPriceEffect,
   computeSwapSplit,
   computeWeekly,
@@ -50,6 +52,11 @@ export interface Env {
   /** Yabancı MB swap fallback (mlr USD, string). K18 çekilemezse kullanılır. Varsayılan 16.4. */
   YABANCI_MB_FALLBACK?: string;
   /**
+   * EVDS günlük altın fiyatı (USD/ons) seri kodu (Faz 11). Varsayılan `TP.ALTINPIYASA.AGORT03`
+   * (BİST Kıymetli Madenler ağırlıklı ortalama). Seri çekilemez/boş dönerse Yahoo GC=F fallback.
+   */
+  GOLD_EVDS_CODE?: string;
+  /**
    * E-posta binding'i (Faz 10, wrangler `[[send_email]]`, name = "EMAIL_SENDER").
    * Tanımlı değilse mail cron'u loglayıp atlar (çekirdek etkilenmez).
    */
@@ -70,6 +77,7 @@ export interface Env {
 // Seri kodları (evds-client'a verilir; nokta→alt çizgi normalizasyonu engine'de).
 const WEEKLY_CODES = ["TP.AB.TOPLAM", "TP.AB.C2", "TP.AB.C1"];
 // Günlük: A02/A10/USD nowcast+NIR; A11/A14 swap ayrıştırması (net dış varlık) için (Faz 5).
+// Faz 11: [start,end] TAM aralık çekilir (swap/fxFlow tarihçesi); nowcast yalnız [çıpa,end] dilimini alır.
 const DAILY_CODES = ["TP.AB.A02", "TP.AB.A10", "TP.AB.A11", "TP.AB.A14", "TP.DK.USD.A.YTL"];
 const DOLARIZASYON_CODES = ["TP.HPBITABLO4.1", "TP.HPBITABLO4.2"];
 // Swap (Faz 5): SWAPTEKTAR günlük (yerli banka), DOVVARNC.K18 aylık (yabancı MB).
@@ -113,12 +121,6 @@ export function todayDdMmYyyy(): string {
   return `${dd}-${mm}-${yyyy}`;
 }
 
-/** ISO `yyyy-mm-dd` → EVDS `dd-mm-yyyy`. Eşleşmezse girdiyi aynen döner. */
-function isoToDdMmYyyy(iso: string): string {
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
-  return m ? `${m[3]}-${m[2]}-${m[1]}` : iso;
-}
-
 /** EVDS `dd-mm-yyyy` → ISO `yyyy-mm-dd`. Eşleşmezse girdiyi aynen döner (altın fiyatı aralığı). */
 function ddMmYyyyToIso(s: string): string {
   const m = /^(\d{2})-(\d{2})-(\d{4})$/.exec(s.trim());
@@ -159,6 +161,11 @@ function summaryTtl(env: Env): number {
 /** Yabancı MB swap fallback değeri (env > sabit). K18 çekilemezse kullanılır. */
 function mbFallback(env: Env): number {
   return Number(env.YABANCI_MB_FALLBACK ?? "") || DEFAULT_MB_FALLBACK;
+}
+/** EVDS altın fiyatı seri kodu (env > varsayılan). */
+function goldEvdsCode(env: Env): string {
+  const c = (env.GOLD_EVDS_CODE ?? "").trim();
+  return c.length > 0 ? c : DEFAULT_GOLD_EVDS_CODE;
 }
 function staleTtl(env: Env): number {
   return Number(env.STALE_TTL ?? "") || DEFAULT_STALE_TTL;
@@ -208,37 +215,46 @@ export async function buildSummary(
   const weekly = computeWeekly(weeklyRows);
   const computed = weeklyMeta(weekly);
 
-  // 2) Çıpa = son haftalık nokta; günlük seri [çıpa, end] aralığında çekilir.
+  // 2) Çıpa = son haftalık nokta. Günlük analitik bilanço [start, end] TAM aralıkta çekilir (Faz 11:
+  //    swap + fxFlow tarihçesi için); nowcast ise sözleşme gereği yalnız [çıpa, end] dilimini kullanır
+  //    (çıpadan önceki günler için son Cuma'dan geriye ekstrapolasyon yapılmaz).
   //    computeWeekly boş seride zaten fırlatır → anchor pratikte hep dolu (savunmacı kontrol).
   const anchor = weekly[weekly.length - 1];
   if (!anchor) {
     throw new EngineError("empty_series", "Çıpa için haftalık veri yok.");
   }
-  const dailyRows = await fetchSeries(
-    DAILY_CODES,
-    isoToDdMmYyyy(anchor.tarih),
-    end,
-    env.TCMB_EVDS_KEY,
-  );
-  let daily = computeDailyNowcast(weekly, dailyRows);
+  const dailyRows = await fetchSeries(DAILY_CODES, start, end, env.TCMB_EVDS_KEY);
+  const nowcastRows = dailyRows.filter((r) => ddMmYyyyToIso(r.tarih) >= anchor.tarih);
+  let daily = computeDailyNowcast(weekly, nowcastRows);
   const latestDaily = daily[daily.length - 1];
 
-  // 2b) Altın-fiyat etkisi (Faz 6) — best-effort/soft-fail. HARİCİ (EVDS-dışı) günlük altın
-  //     fiyatı [start, end] aralığında çekilir (Faz 8 haftalık ayrıştırma tarihsel Cuma fiyatlarını
-  //     ister; tek geniş çekim hem günlük computeGoldPriceEffect'e — çıpa fiyatı priceOnOrBefore
-  //     ile hâlâ çözülür — hem haftalıya hizmet eder, ek ağ çağrısı yok). Çekilemezse goldPriceEffect
-  //     null kalır + goldPriceSource "unavailable" (çekirdek nowcast/NIR düşmez).
+  // 2b) Altın-fiyat etkisi (Faz 6 / Faz 11) — best-effort/soft-fail. Günlük altın fiyatı [start, end]
+  //     aralığında çekilir (Faz 8 haftalık ayrıştırma tarihsel Cuma fiyatlarını ister; tek geniş çekim
+  //     günlük computeGoldPriceEffect'e, haftalık/aylık akışa ve fxFlow'a hizmet eder).
+  //     Faz 11 sıra: (1) TCMB EVDS BİST USD/ons ağırlıklı ortalama (İstanbul seansı — TCMB değerleme
+  //     günüyle hizalı) → (2) boş/hatalıysa Yahoo GC=F fallback (NY kapanışı; günlük etkide zamanlama
+  //     kayması olabilir) → (3) ikisi de yoksa goldPriceEffect null + goldPriceSource "unavailable"
+  //     (çekirdek nowcast/NIR düşmez).
   let goldPriceSource: SummaryMeta["goldPriceSource"] = "unavailable";
   let goldUsdByDate = new Map<string, number>();
   try {
-    goldUsdByDate = await fetchGoldUsdByDate(ddMmYyyyToIso(start), ddMmYyyyToIso(end));
-    daily = computeGoldPriceEffect(weekly, daily, goldUsdByDate);
-    // Hiç noktaya etki yazılamadıysa (oran kurulamadı) kaynağı "unavailable" tut.
-    if (daily.some((d) => d.goldPriceEffect !== null)) goldPriceSource = "external:yahoo-gcf";
+    const goldRows = await fetchSeries([goldEvdsCode(env)], start, end, env.TCMB_EVDS_KEY);
+    goldUsdByDate = goldUsdByDateFromRows(goldRows, goldEvdsCode(env));
+    if (goldUsdByDate.size > 0) goldPriceSource = "evds:altinpiyasa";
   } catch {
-    goldPriceSource = "unavailable";
     goldUsdByDate = new Map();
   }
+  if (goldUsdByDate.size === 0) {
+    try {
+      goldUsdByDate = await fetchGoldUsdByDate(ddMmYyyyToIso(start), ddMmYyyyToIso(end));
+      if (goldUsdByDate.size > 0) goldPriceSource = "external:yahoo-gcf";
+    } catch {
+      goldUsdByDate = new Map();
+    }
+  }
+  daily = computeGoldPriceEffect(weekly, daily, goldUsdByDate);
+  // Hiç noktaya etki yazılamadıysa (oran kurulamadı) kaynağı "unavailable" tut.
+  if (!daily.some((d) => d.goldPriceEffect !== null)) goldPriceSource = "unavailable";
 
   // 2c) Haftalık rezerv değişimi ayrıştırması (Faz 8) — saf, no-throw. Altın soft-fail'de map boş
   //     → gold/other parçaları null, deltalar dolu (grafik tek-mod bara düşer).
@@ -257,23 +273,28 @@ export async function buildSummary(
     dolarizasyon = [];
   }
 
-  // 4) Swap ayrıştırması (Faz 5) — best-effort/soft-fail. Yerli banka SWAPTEKTAR'dan (günlük,
-  //    [çıpa,end]), Yabancı MB DOVVARNC.K18'den (aylık adım, [start,end]); fallback sabiti env'den.
-  //    dailyRows (A02/A11/A14/USD) yeniden kullanılır — ek A02 çekilmez.
+  // 4) Swap ayrıştırması (Faz 5 / Faz 11) — best-effort/soft-fail. Yerli banka SWAPTEKTAR'dan (günlük,
+  //    [start,end] — Faz 11: tam tarihçe), Yabancı MB DOVVARNC.K18'den (aylık adım, [start,end]);
+  //    fallback sabiti env'den. dailyRows (A02/A10/A11/A14/USD) yeniden kullanılır — ek A02 çekilmez.
+  // 4b) Günlük net döviz alımı/satımı (Faz 11, `computeFxFlow`): swap noktaları + haftalık altın (ima
+  //    edilen ons) + altın fiyatı → fxFlow. Swap düşerse fxFlow da [] (aynı soft-fail bloğu).
   let swap: SwapPoint[] = [];
+  let fxFlow: FxFlowPoint[] = [];
   let swapMbSource: SummaryMeta["swapMbSource"] = "fallback";
   let swapMb = mbFallback(env);
   try {
     const [swapRows, mbRows] = await Promise.all([
-      fetchSeries(SWAP_CODES, isoToDdMmYyyy(anchor.tarih), end, env.TCMB_EVDS_KEY),
+      fetchSeries(SWAP_CODES, start, end, env.TCMB_EVDS_KEY),
       fetchSeries(MB_CODES, start, end, env.TCMB_EVDS_KEY),
     ]);
     const split = computeSwapSplit(dailyRows, swapRows, mbRows, mbFallback(env));
     swap = split.points;
     swapMbSource = split.mbSource;
     swapMb = split.mb;
+    fxFlow = computeFxFlow(swap, weekly, goldUsdByDate);
   } catch {
     swap = [];
+    fxFlow = [];
     swapMbSource = "fallback";
     swapMb = mbFallback(env);
   }
@@ -303,7 +324,7 @@ export async function buildSummary(
     goldPriceSource,
     cached: false,
   };
-  return { weekly, daily, dolarizasyon, swap, foreignSecurities, weeklyFlow, monthlyFlow, meta };
+  return { weekly, daily, dolarizasyon, swap, foreignSecurities, weeklyFlow, monthlyFlow, fxFlow, meta };
 }
 
 /** KV'den weekly oku; varsa cached=true işaretle, yoksa null. */

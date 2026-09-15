@@ -7,6 +7,7 @@ import {
   computeDailyNowcast,
   computeDolarizasyon,
   computeForeignSecurities,
+  computeFxFlow,
   computeGoldPriceEffect,
   computeMonthlyFlow,
   computeSwapSplit,
@@ -15,7 +16,7 @@ import {
   EngineError,
   weeklyMeta,
 } from "../src/reserve-engine.ts";
-import type { RawRow, WeeklyPoint } from "../src/types.ts";
+import type { RawRow, SwapPoint, WeeklyPoint } from "../src/types.ts";
 
 // Kabul testi referans değerleri (CLAUDE.md): ham milyon USD.
 const rows: RawRow[] = [
@@ -191,6 +192,15 @@ test("computeSwapSplit: kabul (netDahil/yerli/ymb/toplam/netHaric)", () => {
   assert.ok(Math.abs(p.toplamSwap - 28.024) < 1e-6, "toplam 28.024");
   assert.ok(Math.abs(p.netHaric - 21.976) < 1e-6, "netHaric 21.976");
   assert.ok(Math.abs(r.mb - 16.31) < 1e-9, "meta mb = son nokta ymb");
+  // Faz 11 — kamu (A13) = (A10 − A11 − A14)/USD/1e6 = (4e9 − 4e8 − 4e9)/4e7 = −10 (fixture; işaret korunur).
+  assert.ok(Math.abs((p.kamu ?? 0) - -10) < 1e-6, "kamu −10");
+  const noA10 = computeSwapSplit(
+    [{ ...swapDaily[0]!, TP_AB_A10: null }],
+    swapStok,
+    mbStok,
+    16.4,
+  );
+  assert.equal(noA10.points[0]?.kamu, null, "A10 yoksa kamu null (uydurma 0 yok)");
 });
 
 test("computeSwapSplit: ay-adımı — her gün kendi ayının K18'ini alır", () => {
@@ -450,4 +460,92 @@ test("computeForeignSecurities: boş seri -> empty_series", () => {
     () => computeForeignSecurities([{ tarih: "01-01-2026", TP_MKNETHAR_M7: null }]),
     (e: unknown) => e instanceof EngineError && e.code === "empty_series",
   );
+});
+
+// --- Faz 11: computeFxFlow (günlük net döviz alımı / satımı) -------------------------
+// Doğrulanmış tanım: fxFlow = ΔnetHaric − Γ − ΔKamu − swapRev ≡ ΔnetDahil − ΔyerliBanka − Γ − ΔKamu.
+// Γ = altin(F) × (fiyat_n − fiyat_{n-1}) / fiyat(F); F = prev'e en yakın önceki resmi Cuma.
+const fxWeekly: WeeklyPoint[] = [
+  { tarih: "2026-08-28", toplam: 188.2, doviz: 71.1, altin: 117.1 },
+  { tarih: "2026-09-04", toplam: 184.25, doviz: 70.4, altin: 113.84 }, // çıpa; fiyat 4453 → Q≈25.56M ons
+];
+const sp = (tarih: string, netDahil: number, yerliBanka: number, yabanciMb: number, kamu: number | null): SwapPoint => ({
+  tarih,
+  netDahil,
+  yabanciMb,
+  yerliBanka,
+  toplamSwap: yabanciMb + yerliBanka,
+  netHaric: netDahil - yabanciMb - yerliBanka,
+  kamu,
+});
+// Canlı 10→11.09.2026 (referans analist serisi −0.81): ΔnetDahil −1.964, Δyerli +0.132, Γ ≈ −1.253, ΔKamu −0.04.
+const fxSwap: SwapPoint[] = [
+  sp("2026-09-04", 67.797, -4.338, 16.339, 5.962),
+  sp("2026-09-10", 66.111, -4.402, 16.339, 5.722),
+  sp("2026-09-11", 64.147, -4.270, 16.339, 5.682),
+];
+const fxGold = new Map<string, number>([
+  ["2026-09-04", 4453],
+  ["2026-09-10", 4388],
+  ["2026-09-11", 4339],
+]);
+
+test("computeFxFlow: kabul — 10→11.09 ≈ −0.81 (referans analist serisi) + kimlik kapanır", () => {
+  const out = computeFxFlow(fxSwap, fxWeekly, fxGold);
+  assert.equal(out.length, 2, "n−1 nokta");
+  const p = out[1]!;
+  assert.equal(p.tarih, "2026-09-11");
+  assert.equal(p.prevTarih, "2026-09-10");
+  assert.ok(Math.abs(p.deltaNetHaric - (-1.964 - 0.132)) < 1e-6, "ΔnetHaric = ΔnetDahil − Δyerli (ymb sabit)");
+  const gamma = 113.84 * (4339 - 4388) / 4453;
+  assert.ok(Math.abs((p.goldPriceEffect ?? 0) - gamma) < 1e-9, "Γ Laspeyres (ima edilen ons, çıpa 04-09)");
+  assert.ok(Math.abs((p.kamuDelta ?? 0) - -0.04) < 1e-9, "ΔKamu −0.04");
+  assert.equal(p.swapRevision, 0, "ay içinde swap revizyonu 0");
+  assert.ok(Math.abs((p.fxFlow ?? 0) - -0.81) < 0.02, "net döviz alımı ≈ −0.81 (satış)");
+  // Kimlik: ΔnetHaric = fx + Γ + ΔKamu + swapRev
+  for (const q of out) {
+    assert.ok(
+      Math.abs(q.deltaNetHaric - ((q.fxFlow ?? 0) + (q.goldPriceEffect ?? 0) + (q.kamuDelta ?? 0) + q.swapRevision)) < 1e-9,
+      "kimlik kapanır",
+    );
+  }
+});
+
+test("computeFxFlow: Yabancı MB ay adımı swapRevision'a gider (işlem sayılmaz)", () => {
+  const swap: SwapPoint[] = [
+    sp("2026-08-31", 60, 0, 16.0, 5), // Ağustos K18 16.0
+    sp("2026-09-01", 60, 0, 16.5, 5), // Eylül K18 16.5 → netHaric −0.5 düşer
+  ];
+  const gold = new Map<string, number>([["2026-08-28", 4400], ["2026-08-31", 4400], ["2026-09-01", 4400]]);
+  const out = computeFxFlow(swap, fxWeekly, gold);
+  const p = out[0]!;
+  assert.ok(Math.abs(p.deltaNetHaric - -0.5) < 1e-9, "ham Δ swap hariç −0.5");
+  assert.ok(Math.abs(p.swapRevision - -0.5) < 1e-9, "swapRevision = −ΔyabanciMb = −0.5");
+  assert.equal(p.goldPriceEffect, 0, "fiyat sabit → Γ 0");
+  assert.ok(Math.abs((p.fxFlow ?? 1) - 0) < 1e-9, "revizyon akım değil → fxFlow 0");
+});
+
+test("computeFxFlow: altın fiyatı eksik gün → gold + fxFlow null (taşıma YOK); kamu null → fxFlow null", () => {
+  const goldMissing = new Map<string, number>([["2026-09-04", 4453], ["2026-09-11", 4339]]); // 10-09 yok
+  const out = computeFxFlow(fxSwap, fxWeekly, goldMissing);
+  assert.equal(out[0]!.goldPriceEffect, null, "04→10: 10-09 fiyatı yok → null");
+  assert.equal(out[0]!.fxFlow, null);
+  assert.equal(out[1]!.goldPriceEffect, null, "10→11: 10-09 fiyatı yok → null");
+  assert.ok(Math.abs(out[1]!.deltaNetHaric - (-1.964 - 0.132)) < 1e-6, "delta yine dolu");
+  const kamuNull = computeFxFlow(
+    [fxSwap[0]!, fxSwap[1]!, { ...fxSwap[2]!, kamu: null }],
+    fxWeekly,
+    fxGold,
+  );
+  assert.equal(kamuNull[1]!.kamuDelta, null);
+  assert.equal(kamuNull[1]!.fxFlow, null, "kamu yoksa fxFlow null");
+  assert.notEqual(kamuNull[1]!.goldPriceEffect, null, "gold yine hesaplanır");
+});
+
+test("computeFxFlow: < 2 nokta → []; boş harita → gold/fx null, delta dolu", () => {
+  assert.deepEqual(computeFxFlow([fxSwap[0]!], fxWeekly, fxGold), []);
+  assert.deepEqual(computeFxFlow([], fxWeekly, fxGold), []);
+  const out = computeFxFlow(fxSwap, fxWeekly, new Map());
+  assert.equal(out.length, 2);
+  assert.ok(out.every((p) => p.goldPriceEffect === null && p.fxFlow === null && Number.isFinite(p.deltaNetHaric)));
 });

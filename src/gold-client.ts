@@ -1,10 +1,40 @@
-// M-001b gold-client (Faz 6) — HARİCİ (EVDS-DIŞI) günlük altın fiyatı çeker.
-// >>> İSTİSNA: "evds-client dışında hiçbir modül EVDS'e dokunmaz" kuralı EVDS içindir.
-//     EVDS'te temiz günlük uluslararası altın fiyatı YOK (CLAUDE.md), bu yüzden altın-fiyat
-//     etkisi (Faz 6) için tek harici bağımlılık burada izole edilir. Soft-fail: çağıran
-//     try/catch ile sarmalar → çekilemezse goldPriceEffect null, çekirdek nowcast düşmez. <<<
-// Kaynak: Yahoo Finance v8 chart (GC=F · altın vadeli). Etki ORAN-bazlı olduğundan vadeli↔spot
-// baz farkı sadeleşir (research-gold-price-effect.md).
+// M-001b gold-client (Faz 6 / Faz 11) — günlük altın fiyatı (USD/ons) kaynakları.
+// Faz 11: TERCİH = TCMB EVDS BİST Kıymetli Madenler USD/ons ağırlıklı ortalama serisi
+//   (`GOLD_EVDS_CODE`, varsayılan TP.ALTINPIYASA.AGORT03 — iş günü, İstanbul seansı). Çekim
+//   evds-client `fetchSeries` ile yapılır (kural korunur: EVDS'e yalnız evds-client dokunur);
+//   burada yalnız SAF satır→harita dönüşümü var (`goldUsdByDateFromRows`).
+//   Sebep: Yahoo GC=F NY kapanışıdır (İstanbul seansından ~6 sa sonra; ABD tatillerinde boş) →
+//   günlük altın-fiyat etkisinin İŞARETİ bile yanlış çıkabiliyordu (ör. 10→11.09.2026: +1,1 yerine
+//   −1,25 mlr); "diğer/döviz akışı" barları bu hatayı ters işaretle yutuyordu.
+// FALLBACK (yalnız EVDS altın serisi çekilemez/boşsa): Yahoo Finance v8 chart (GC=F · altın vadeli).
+//   >>> İSTİSNA: "evds-client dışında hiçbir modül EVDS'e dokunmaz" kuralı EVDS içindir; Yahoo
+//       tek harici bağımlılık olarak burada izole kalır. Soft-fail: çağıran try/catch ile sarmalar
+//       → hiçbiri çekilemezse goldPriceEffect null, çekirdek nowcast düşmez. <<<
+// Etki ORAN-bazlı olduğundan vadeli↔spot / ağırlıklı-ortalama↔kapanış baz farkı sadeleşir
+// (research-gold-price-effect.md).
+
+import type { RawRow } from "./types.ts";
+
+/** EVDS altın fiyatı serisi (varsayılan). Env `GOLD_EVDS_CODE` ile geçersiz kılınabilir. */
+export const DEFAULT_GOLD_EVDS_CODE = "TP.ALTINPIYASA.AGORT03";
+
+/**
+ * evds-client'ın döndürdüğü ham satırları ISO tarih → USD/ons haritasına çevirir (SAF).
+ * `code` noktaları alt çizgiye çevrilerek anahtar bulunur (`TP.X.Y` → `TP_X_Y`). Değer null/0/
+ * sonlu-olmayan satırlar atlanır. Boş harita dönebilir (çağıran fallback'e karar verir).
+ */
+export function goldUsdByDateFromRows(rows: RawRow[], code: string): Map<string, number> {
+  const key = code.replace(/\./g, "_");
+  const byDate = new Map<string, number>();
+  for (const r of rows) {
+    const v = r[key];
+    if (typeof v !== "number" || !Number.isFinite(v) || v <= 0) continue;
+    const m = /^(\d{2})-(\d{2})-(\d{4})$/.exec(r.tarih.trim());
+    const iso = m ? `${m[3]}-${m[2]}-${m[1]}` : r.tarih.trim();
+    byDate.set(iso, v);
+  }
+  return byDate;
+}
 
 /** gold-client'ın fırlattığı hata (çağıran soft-fail ile yakalar). */
 export class GoldError extends Error {
