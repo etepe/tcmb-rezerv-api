@@ -54,6 +54,8 @@ const K_MB_K18 = "TP_DOVVARNC_K18"; // SDDS 2.2.1.3 (4ay–1yıl swap bacağı) 
 //      ÖST (GYD sekt) stok M6 / net M12   (1.1.3 / 2.1.3)
 //    Bu anahtarlar summary.ts'teki FOREIGN_SEC_CODES kodlarının nokta→alt çizgi karşılığıdır
 //    (key === code.replaceAll(".", "_")); İKİSİ BİRLİKTE değişmeli. Birim: milyon USD → /1000.
+//    KUR DÖNÜŞÜMÜ YOK (bilinçli): TCMB bu serileri USD yayımlar ve dönüşümü kendisi yapar (hisse: günlük
+//    TCMB gösterge USD alış kuru; borçlanma senedi: haftanın ortalama kuru). TP.DK.USD ile tekrar çevirme.
 const K_FS_HISSE_FLOW = "TP_MKNETHAR_M7"; //    yurt dışı yerleşik hisse senedi net değişim (milyon USD)
 const K_FS_HISSE_STOCK = "TP_MKNETHAR_M1"; //   hisse senedi stok (milyon USD)
 const K_FS_DIBS_FLOW = "TP_MKNETHAR_M8"; //     DİBS (Kesin Alım) net değişim (milyon USD)

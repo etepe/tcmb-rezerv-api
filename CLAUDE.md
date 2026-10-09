@@ -183,6 +183,14 @@ geriye dönük yeniden çıpalarız; analist yayım-takvimi gecikmesiyle bir ön
   typecheck + 34/34 test + dry-run ✅; astro build ✅. **Seri kodları TEYİT EDİLDİ** (kullanıcı EVDS
   ekran görüntüsü): datagroup `bie_mknethar` → hisse `M1`/`M7`, DİBS `M2`/`M8`, ÖST `M6`/`M12`
   (stok/net; "Yurt İçi Piyasa" alt-kalemleri). Birim milyon USD → /1000.
+  **Kur kontrolü (2026-10-09):** TP.MKNETHAR serileri TCMB'nin KENDİ USD karşılıklarıdır → worker'da kur
+  dönüşümü YOK ve EKLENMEMELİ (TP.DK.USD ile ikinci kez çevirmek çift dönüşüm olur). TCMB metaverisi
+  (RIPMetaveri, 24.09.2026): net işlem fiyat+kur etkisinden arındırılır; hisse = günlük net değişim × o
+  günün TCMB gösterge USD alış kuru (haftalık toplam), borçlanma senedi = haftalık nominal Δ × ort. fiyat ÷
+  haftanın ortalama USD alış kuru. Canlı API = TCMB bülteni birebir (02.10: hisse −189,9 / DİBS −484,7 /
+  ÖST −60,0 mn$; 52 hafta toplamı Bizim Menkul 12 aylık ile aynı). Banka raporu farkları: kaynak
+  (BIST/MKK TL verisi), YTD tabanı (ilk hafta 02.01 dahil mi), ilk yayım vs revize, stok Δ ≠ net işlem.
+  UI akımları **milyon $** gösterir (milyar tek ondalık 189,9'u "0,2" yapıyordu).
 - Tamamlanan (Faz 8 — API): haftalık rezerv değişimi ayrıştırması. `WeeklyFlowPoint` (tarih/prevTarih/
   delta/goldPriceEffect/otherPart/nowcast) + `SummaryResponse.weeklyFlow`; `computeWeeklyFlow` (saf, no-throw)
   — `computeGoldPriceEffect` oran-bazlı yönteminin HAFTALIK analoğu: her ardışık Cuma çifti için
